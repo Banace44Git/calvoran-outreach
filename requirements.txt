@@ -1,0 +1,5 @@
+apify-client>=1.7.0
+supabase>=2.5.0
+python-dotenv>=1.0.0
+anthropic>=0.40.0
+tqdm>=4.66.0

@@ -1,0 +1,131 @@
+{
+  "id": "automation-lab/indeed-scraper",
+  "title": "Indeed Scraper",
+  "input_schema": "{\n  \"title\": \"Indeed Scraper\",\n  \"description\": \"<p>Scrape job listings from Indeed. Enter a job title and location to get started.</p>\",\n  \"type\": \"object\",\n  \"schemaVersion\": 1,\n  \"properties\": {\n    \"query\": {\n      \"title\": \"Job Title / Keywords\",\n      \"type\": \"string\",\n      \"description\": \"Job title, keywords, or company name to search for.\",\n      \"editor\": \"textfield\",\n      \"prefill\": \"software engineer\",\n      \"sectionCaption\": \"🔍 Search\",\n      \"sectionDescription\": \"Define your job search criteria.\"\n    },\n    \"location\": {\n      \"title\": \"Location\",\n      \"type\": \"string\",\n      \"description\": \"City, state, zip code, or 'remote'.\",\n      \"editor\": \"textfield\",\n      \"prefill\": \"New York, NY\"\n    },\n    \"country\": {\n      \"title\": \"Country\",\n      \"type\": \"string\",\n      \"description\": \"Indeed country domain to search on.\",\n      \"editor\": \"select\",\n      \"enum\": [\n        \"US\",\n        \"UK\",\n        \"CA\",\n        \"AU\",\n        \"IN\",\n        \"DE\",\n        \"FR\",\n        \"NL\",\n        \"BE\",\n        \"CH\",\n        \"AT\",\n        \"IT\",\n        \"ES\",\n        \"BR\",\n        \"MX\",\n        \"JP\",\n        \"SG\",\n        \"HK\"\n      ],\n      \"enumTitles\": [\n        \"United States\",\n        \"United Kingdom\",\n        \"Canada\",\n        \"Australia\",\n        \"India\",\n        \"Germany\",\n        \"France\",\n        \"Netherlands\",\n        \"Belgium\",\n        \"Switzerland\",\n        \"Austria\",\n        \"Italy\",\n        \"Spain\",\n        \"Brazil\",\n        \"Mexico\",\n        \"Japan\",\n        \"Singapore\",\n        \"Hong Kong\"\n      ],\n      \"default\": \"US\"\n    },\n    \"maxItems\": {\n      \"title\": \"Max Results\",\n      \"type\": \"integer\",\n      \"description\": \"Maximum number of job listings to extract. Set 0 for unlimited.\",\n      \"default\": 50,\n      \"prefill\": 20,\n      \"minimum\": 0,\n      \"sectionCaption\": \"📊 Limits\",\n      \"sectionDescription\": \"Control how many results to scrape.\"\n    },\n    \"jobType\": {\n      \"title\": \"Job Type\",\n      \"type\": \"string\",\n      \"description\": \"Filter by job type.\",\n      \"editor\": \"select\",\n      \"enum\": [\n        \"\",\n        \"fulltime\",\n        \"parttime\",\n        \"contract\",\n        \"temporary\",\n        \"internship\"\n      ],\n      \"default\": \"\",\n      \"enumTitles\": [\n        \"Any\",\n        \"Full-time\",\n        \"Part-time\",\n        \"Contract\",\n        \"Temporary\",\n        \"Internship\"\n      ],\n      \"sectionCaption\": \"🔧 Filters\",\n      \"sectionDescription\": \"Narrow down search results.\"\n    },\n    \"datePosted\": {\n      \"title\": \"Date Posted\",\n      \"type\": \"string\",\n      \"description\": \"Filter by posting date.\",\n      \"editor\": \"select\",\n      \"enum\": [\n        \"\",\n        \"1\",\n        \"3\",\n        \"7\",\n        \"14\"\n      ],\n      \"default\": \"\",\n      \"enumTitles\": [\n        \"Any time\",\n        \"Last 24 hours\",\n        \"Last 3 days\",\n        \"Last 7 days\",\n        \"Last 14 days\"\n      ]\n    },\n    \"includeDescription\": {\n      \"title\": \"Include Full Description\",\n      \"type\": \"boolean\",\n      \"description\": \"Scrape full job description for each listing. Increases run time but provides complete job details.\",\n      \"default\": true,\n      \"sectionCaption\": \"📤 Output\",\n      \"sectionDescription\": \"Control what data is extracted.\"\n    },\n    \"urls\": {\n      \"title\": \"Direct URLs\",\n      \"type\": \"array\",\n      \"description\": \"Indeed search result URLs or job detail URLs to scrape directly. Use instead of search parameters.\",\n      \"editor\": \"stringList\",\n      \"sectionCaption\": \"⚙️ Advanced\",\n      \"sectionDescription\": \"For advanced users — provide Indeed URLs directly.\"\n    },\n    \"maxRequestRetries\": {\n      \"title\": \"Max Retries\",\n      \"type\": \"integer\",\n      \"description\": \"Number of retry attempts for failed requests.\",\n      \"default\": 3,\n      \"minimum\": 1,\n      \"maximum\": 10\n    }\n  }\n}",
+  "raw": {
+    "id": "xuAyn6XV1gQMBlYo6",
+    "userId": "ntHCnhNUkzXR7nbUZ",
+    "name": "indeed-scraper",
+    "username": "automation-lab",
+    "description": "Scrape Indeed job listings with salary ranges, company details, and full descriptions. Search by keyword, location, and job type across 18 countries. Pure HTTP — 3x cheaper than browser-based alternatives. Export to JSON, CSV, Excel.",
+    "isPublic": true,
+    "createdAt": "2026-03-14 01:30:50.124000+00:00",
+    "modifiedAt": "2026-03-30 07:03:59.718000+00:00",
+    "taggedBuilds": {
+      "latest": {
+        "buildId": "ii87U8vKFLaCwaBNy",
+        "finishedAt": "2026-03-30 07:03:59.718000+00:00",
+        "buildNumberInt": 100030,
+        "buildNumber": "0.1.30"
+      },
+      "beta": {
+        "buildId": "TmaPxnzD4JMTMqhfe",
+        "finishedAt": "2026-03-26 14:01:40.977000+00:00",
+        "buildNumberInt": 100028,
+        "buildNumber": "0.1.28"
+      }
+    },
+    "stats": {
+      "totalBuilds": 30,
+      "totalRuns": 879,
+      "totalUsers": 43,
+      "totalUsers7Days": 7,
+      "totalUsers30Days": 21,
+      "totalUsers90Days": 25,
+      "lastRunStartedAt": "2026-05-04 10:34:22.947000+00:00",
+      "actorReviewCount": 0,
+      "actorReviewRating": 0,
+      "bookmarkCount": 0,
+      "publicActorRunStats30Days": {
+        "ABORTED": 3,
+        "FAILED": 0,
+        "SUCCEEDED": 768,
+        "TIMED-OUT": 0,
+        "TOTAL": 771
+      }
+    },
+    "versions": [
+      {
+        "versionNumber": "0.1",
+        "sourceType": "SOURCE_FILES",
+        "buildTag": "latest"
+      }
+    ],
+    "defaultRunOptions": {
+      "timeoutSecs": 300,
+      "memoryMbytes": 256,
+      "build": "latest"
+    },
+    "exampleRunInput": {
+      "body": "{\"query\": \"software engineer\", \"location\": \"New York, NY\", \"maxItems\": 20, \"includeDescription\": true}",
+      "contentType": "application/json"
+    },
+    "categories": [
+      "JOBS",
+      "LEAD_GENERATION"
+    ],
+    "isDeprecated": false,
+    "title": "Indeed Scraper",
+    "pictureUrl": "https://apify-image-uploads-prod.s3.us-east-1.amazonaws.com/ntHCnhNUkzXR7nbUZ-actor-xuAyn6XV1gQMBlYo6-UhpyxM1oR0-actor-icon.png",
+    "seoTitle": "💼 Indeed Scraper — Extract Jobs, Salaries & Companies",
+    "seoDescription": "Scrape Indeed job listings at scale. Extract title, salary, location, full description, job type, and employer data. 18 countries, pure HTTP, no browser.",
+    "pricingInfos": [
+      {
+        "pricingModel": "PAY_PER_EVENT",
+        "startedAt": "2026-03-14 00:00:00+00:00",
+        "apifyMarginPercentage": 0.2,
+        "pricingPerEvent": {
+          "actorChargeEvents": {
+            "start": {
+              "eventTitle": "Run started",
+              "eventDescription": "One-time charge when the scraper starts.",
+              "isOneTimeEvent": true,
+              "eventPriceUsd": 0.01
+            },
+            "job-listing": {
+              "eventTitle": "Job listing scraped",
+              "eventDescription": "Charged per job listing extracted with full details.",
+              "eventPriceUsd": 0.005
+            },
+            "browser-session": {
+              "eventTitle": "Browser session",
+              "eventDescription": "Charged per browser session used for scraping.",
+              "eventPriceUsd": 0.1
+            }
+          }
+        },
+        "createdAt": "2026-03-14 01:34:58.903000+00:00"
+      },
+      {
+        "pricingModel": "PAY_PER_EVENT",
+        "startedAt": "2026-03-14 01:58:00+00:00",
+        "pricingPerEvent": {
+          "actorChargeEvents": {
+            "start": {
+              "eventTitle": "Run started",
+              "eventDescription": "One-time charge when the scraper starts.",
+              "isOneTimeEvent": true,
+              "eventPriceUsd": 0.005
+            },
+            "job-listing": {
+              "eventTitle": "Job listing scraped",
+              "eventDescription": "Charged per job listing extracted with full details.",
+              "eventPriceUsd": 0.003
+            }
+          }
+        },
+        "createdAt": "2026-03-14 01:58:40.307000+00:00",
+        "apifyMarginPercentage": 0.2
+      }
+    ],
+    "notice": "NONE",
+    "isCritical": false,
+    "isGeneric": false,
+    "hasNoDataset": false,
+    "isSourceCodeHidden": true,
+    "standbyUrl": null,
+    "actorPermissionLevel": "LIMITED_PERMISSIONS",
+    "readmeSummary": "## Indeed Scraper\n\nIndeed Scraper extracts structured job posting data from Indeed at scale using pure HTTP requests (no browser). It performs keyword-and-location searches or direct URL scraping across 18 country domains, supports filters for job type, date posted and experience level, and returns analysis-ready records that capture job title, hiring company details, salary (actual or site-estimated), location (including remote), full job description (plain text and HTML), posting date and unique identifier, plus employer metadata such as industry, company size and revenue. The Actor is optimized for high-throughput extraction of hundreds to thousands of listings per run, producing machine-readable job datasets for scraping, salary benchmarking, hiring-trend analysis, lead generation, and automated monitoring.\n\n## Use cases\n\n- Monitor open positions across competitors to track which companies are hiring for specific roles and identify talent demand patterns (recruiting/ staffing).\n- Track new job postings daily and compare salary ranges across cities (job seekers and career coaching).\n- Study hiring trends, wage growth, and labor demand across industries, regions, and time periods with structured employment data (market research and analytics).\n- Identify companies actively hiring as warm leads for sales and business development; combine with enrichment workflows for contact discovery.\n- Benchmark salaries, benefits, and job requirements for compensation planning and HR strategy.\n- Collect large-scale job posting corpora for academic research, labor economics, NLP analysis of job descriptions, or diversity and inclusion studies.",
+    "deploymentKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCv1CpPcuOYebFqny3Oy62EKEGXkzj2z4nhcBcI7oLmR5etkGbrIyeIJvzvD0/hQdQ574/Q0K86WwjutOQBN1FBlPlULerET2BG+0cbiZIXtydeeOejo1JahOf8S6Mt4HboI/cSSCSTzhBEm2TUSMGR5C/AwAjRrL19PVaNYelmEZCSZ1/xpf/KJmo03Rb/GyZh6kOCfQmOj+OejcckvBaW1FWm1MUjFqqy7Fl3CjIhpSQPiKY+kBZiTnwEmwYto0LUyMSJj0zcVrlsyz+Brh+OrLZFQ2AP0Yk/lJfFQ0+9Z4zSCpskRc7aRpt6cNuy5rNMN9VkFI97zt+zoHq04f4R \n"
+  }
+}

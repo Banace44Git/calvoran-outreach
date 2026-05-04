@@ -1,0 +1,150 @@
+{
+  "id": "santamaria-automations/arbeitsagentur-de-scraper",
+  "title": "Arbeitsagentur.de Scraper - German Federal Job Board",
+  "input_schema": "{\n  \"title\": \"Arbeitsagentur.de Job Scraper Input\",\n  \"type\": \"object\",\n  \"schemaVersion\": 1,\n  \"properties\": {\n    \"directUrls\": {\n      \"title\": \"Direct Job URLs\",\n      \"type\": \"array\",\n      \"description\": \"Optional: Direct URLs to specific job listings to check status\",\n      \"editor\": \"stringList\",\n      \"items\": {\n        \"type\": \"string\",\n        \"pattern\": \"^https://\"\n      }\n    },\n    \"searchQueries\": {\n      \"title\": \"Search Keywords (Was)\",\n      \"type\": \"array\",\n      \"description\": \"One or more search keywords. Each keyword runs as a separate search. Results are deduplicated across queries.\",\n      \"editor\": \"stringList\",\n      \"placeholderValue\": \"Softwareentwickler\",\n      \"prefill\": [\n        \"Software Engineer\"\n      ],\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"searchQuery\": {\n      \"title\": \"Search Keyword (single, legacy)\",\n      \"type\": \"string\",\n      \"description\": \"Single search keyword (backward compatible). Use 'searchQueries' for multiple keywords.\",\n      \"editor\": \"textfield\",\n      \"example\": \"Softwareentwickler\"\n    },\n    \"location\": {\n      \"title\": \"Location (Wo)\",\n      \"type\": \"string\",\n      \"description\": \"City, region, or area (e.g., 'Munchen', 'Berlin', 'Nordrhein-Westfalen')\",\n      \"editor\": \"textfield\",\n      \"example\": \"Munchen\",\n      \"prefill\": \"Berlin\"\n    },\n    \"bundesland\": {\n      \"title\": \"Bundesland (Federal State)\",\n      \"type\": \"string\",\n      \"description\": \"German federal state code\",\n      \"editor\": \"select\",\n      \"default\": \"\",\n      \"enum\": [\n        \"\",\n        \"BW\",\n        \"BY\",\n        \"BE\",\n        \"BB\",\n        \"HB\",\n        \"HH\",\n        \"HE\",\n        \"MV\",\n        \"NI\",\n        \"NW\",\n        \"RP\",\n        \"SL\",\n        \"SN\",\n        \"ST\",\n        \"SH\",\n        \"TH\"\n      ],\n      \"enumTitles\": [\n        \"All States\",\n        \"Baden-Wurttemberg\",\n        \"Bayern (Bavaria)\",\n        \"Berlin\",\n        \"Brandenburg\",\n        \"Bremen\",\n        \"Hamburg\",\n        \"Hessen\",\n        \"Mecklenburg-Vorpommern\",\n        \"Niedersachsen\",\n        \"Nordrhein-Westfalen\",\n        \"Rheinland-Pfalz\",\n        \"Saarland\",\n        \"Sachsen\",\n        \"Sachsen-Anhalt\",\n        \"Schleswig-Holstein\",\n        \"Thuringen\"\n      ]\n    },\n    \"employmentType\": {\n      \"title\": \"Employment Type (Beschaftigungsart)\",\n      \"type\": \"string\",\n      \"description\": \"Type of employment\",\n      \"editor\": \"select\",\n      \"default\": \"\",\n      \"enum\": [\n        \"\",\n        \"VOLLZEIT\",\n        \"TEILZEIT\",\n        \"MINIJOB\",\n        \"AUSBILDUNG\",\n        \"PRAKTIKUM\",\n        \"FREIBERUFLICH\",\n        \"HEIMARBEIT\"\n      ],\n      \"enumTitles\": [\n        \"All Types\",\n        \"Vollzeit (Full-time)\",\n        \"Teilzeit (Part-time)\",\n        \"Minijob (Mini job)\",\n        \"Ausbildung (Apprenticeship)\",\n        \"Praktikum (Internship)\",\n        \"Freiberuflich (Freelance)\",\n        \"Heimarbeit (Remote work)\"\n      ]\n    },\n    \"maxResultsPerQuery\": {\n      \"title\": \"Max Results per Query\",\n      \"type\": \"integer\",\n      \"description\": \"Maximum results per search keyword. Each query gets up to this many results (deduplicated).\",\n      \"default\": 100,\n      \"minimum\": 1,\n      \"prefill\": 5\n    },\n    \"maxResults\": {\n      \"title\": \"Max Total Results\",\n      \"type\": \"integer\",\n      \"description\": \"Total cap across all queries. Set to 0 for unlimited (each query limited by maxResultsPerQuery).\",\n      \"default\": 0,\n      \"minimum\": 0\n    },\n    \"includeJobDetails\": {\n      \"title\": \"Extract Contact Details (with Captcha Solving)\",\n      \"type\": \"boolean\",\n      \"description\": \"Extract contact details (email, phone, contact person) via ML-powered captcha solving, plus full job description, company website, logo, and description. Pure HTTP -- no browser needed. Slower (~3-5s/job) but provides valuable data hidden behind a captcha.\",\n      \"default\": false\n    },\n    \"proxyConfiguration\": {\n      \"title\": \"Proxy Configuration\",\n      \"type\": \"object\",\n      \"description\": \"Apify proxy settings (recommended for reliable scraping)\",\n      \"editor\": \"proxy\",\n      \"default\": {\n        \"useApifyProxy\": true\n      }\n    }\n  }\n}",
+  "raw": {
+    "id": "W1KlQhgxuiGN7vnFu",
+    "userId": "JPTusCraYpabsjDXq",
+    "name": "arbeitsagentur-de-scraper",
+    "username": "santamaria-automations",
+    "description": "Extract jobs from Germany's official employment agency (Bundesagentur für Arbeit). Get job titles, companies, locations, salaries, descriptions & contact details with ML-powered captcha solving. Supports search filters, direct URLs & job status checks.",
+    "isPublic": true,
+    "createdAt": "2025-12-23 14:09:40.302000+00:00",
+    "modifiedAt": "2026-04-21 09:25:47.973000+00:00",
+    "taggedBuilds": {
+      "latest": {
+        "buildId": "6Ve1kfLgWYswbYGnX",
+        "finishedAt": "2026-04-21 09:25:47.973000+00:00",
+        "buildNumberInt": 30000017,
+        "buildNumber": "3.0.17"
+      }
+    },
+    "stats": {
+      "totalBuilds": 34,
+      "totalRuns": 280,
+      "totalUsers": 29,
+      "totalUsers7Days": 2,
+      "totalUsers30Days": 5,
+      "totalUsers90Days": 14,
+      "lastRunStartedAt": "2026-05-04 08:04:36.678000+00:00",
+      "actorReviewCount": 0,
+      "actorReviewRating": 0,
+      "bookmarkCount": 2,
+      "publicActorRunStats30Days": {
+        "ABORTED": 0,
+        "FAILED": 4,
+        "SUCCEEDED": 59,
+        "TIMED-OUT": 0,
+        "TOTAL": 63
+      }
+    },
+    "versions": [
+      {
+        "versionNumber": "1.0",
+        "sourceType": "SOURCE_FILES",
+        "buildTag": "latest"
+      },
+      {
+        "versionNumber": "2.0",
+        "sourceType": "TARBALL",
+        "buildTag": "latest"
+      },
+      {
+        "versionNumber": "3.0",
+        "sourceType": "TARBALL",
+        "buildTag": "latest"
+      }
+    ],
+    "defaultRunOptions": {
+      "build": "latest",
+      "timeoutSecs": 3600,
+      "memoryMbytes": 128
+    },
+    "exampleRunInput": {
+      "body": "{ \"helloWorld\": 123 }",
+      "contentType": "application/json; charset=utf-8"
+    },
+    "categories": [
+      "JOBS",
+      "LEAD_GENERATION"
+    ],
+    "isDeprecated": false,
+    "title": "Arbeitsagentur.de Scraper - German Federal Job Board",
+    "pictureUrl": "https://apify-image-uploads-prod.s3.us-east-1.amazonaws.com/JPTusCraYpabsjDXq-actor-W1KlQhgxuiGN7vnFu-bI1FmvoalP-arbeitsagentur.de.png",
+    "seoTitle": null,
+    "seoDescription": null,
+    "pricingInfos": [
+      {
+        "minimalMaxTotalChargeUsd": null,
+        "pricingModel": "PAY_PER_EVENT",
+        "isPriceChangeNotificationSuppressed": false,
+        "pricingPerEvent": {
+          "actorChargeEvents": {
+            "apify-actor-start": {
+              "eventTitle": "Actor Start",
+              "eventDescription": "Charged when the Actor starts running. Number of events charged depends on Actor memory (one event per GB, minimum one event).",
+              "isOneTimeEvent": true,
+              "eventPriceUsd": 0.01
+            },
+            "apify-default-dataset-item": {
+              "eventTitle": "result",
+              "eventDescription": "Single job listing in the default dataset",
+              "eventPriceUsd": 0.003
+            },
+            "job-with-contact": {
+              "eventTitle": "Contact Extracted",
+              "eventDescription": "Charged when contact details (email/phone) are extracted via captcha solving",
+              "isOneTimeEvent": false,
+              "eventPriceUsd": 0.01
+            }
+          }
+        },
+        "startedAt": "2026-01-27 12:32:35.450000+00:00",
+        "createdAt": "2026-01-27 12:32:35.848000+00:00",
+        "apifyMarginPercentage": 0.2
+      },
+      {
+        "minimalMaxTotalChargeUsd": null,
+        "pricingModel": "PAY_PER_EVENT",
+        "isPriceChangeNotificationSuppressed": false,
+        "reasonForChange": "Aligned pricing across all DACH job scrapers to a unified pay-per-event model. New custom events (job-serp-result, job-detail-result) replace the default dataset-item pricing for more transparent, usage-based billing.",
+        "pricingPerEvent": {
+          "actorChargeEvents": {
+            "apify-actor-start": {
+              "eventTitle": "Actor Start",
+              "eventDescription": "Charged when the Actor starts running. Number of events charged depends on Actor memory (one event per GB, minimum one event).",
+              "isOneTimeEvent": true,
+              "eventPriceUsd": 0.05
+            },
+            "job-serp-result": {
+              "eventTitle": "Job SERP Result",
+              "eventDescription": "Job Result with the details available on SERP",
+              "isOneTimeEvent": false,
+              "eventPriceUsd": 0.008,
+              "isPrimaryEvent": true
+            },
+            "job-detail-result": {
+              "eventTitle": "Job Detail Result",
+              "eventDescription": "Job Result with the details available on Job Detail Page",
+              "isOneTimeEvent": false,
+              "eventPriceUsd": 0.02
+            }
+          }
+        },
+        "startedAt": "2026-03-13 13:20:22.839000+00:00",
+        "createdAt": "2026-02-27 13:20:23.269000+00:00",
+        "apifyMarginPercentage": 0.2,
+        "notifiedAboutFutureChangeAt": "2026-02-27 13:20:43.677000+00:00"
+      }
+    ],
+    "notice": "NONE",
+    "isCritical": false,
+    "isGeneric": false,
+    "hasNoDataset": false,
+    "isSourceCodeHidden": true,
+    "standbyUrl": null,
+    "actorPermissionLevel": "LIMITED_PERMISSIONS",
+    "readmeSummary": "## Arbeitsagentur.de Job Scraper\n\nA scraper for job listings on Arbeitsagentur.de (Bundesagentur für Arbeit) that performs API-based searches and returns structured, searchable job data: titles, company information (name, website, logo, description), location and federal-state metadata, salary ranges and currency/period, employment type and workload/remote flags, full job descriptions, posting and modification dates, application links and contact details (email, phone, contact person) when available. The Actor uses a pure-HTTP architecture (no browser) to call public REST endpoints for search, job details, and employer profiles, and it performs a captcha-protected contact-data retrieval flow that uses an ONNX neural-network solver to extract hidden contact information. Features include multi-keyword runs with automatic deduplication, direct-URL status checks for specific listings, optional deep extraction of company and contact data, and output formatted to a standardized job-listing schema. Performance characteristics: low-memory/high-speed search mode and a higher-memory slower mode when fetching full job details and contact data.\n\n## Use cases\n\n- Run multi-keyword searches across Arbeitsagentur.de and deduplicate results from multiple queries.\n- Filter searches by location, federal state, and employment type to collect region-specific job listings.\n- High-volume scraping of basic listing metadata (titles, locations, posting dates) in a fast, low-memory mode.\n- Full extraction of listings to obtain complete descriptions, structured salary data, employer profiles (website, logo, description), and contact details unlocked via captcha solving.\n- Check the status or availability of individual job postings via direct-URL mode.\n- Enrich job datasets for recruitment sourcing, market intelligence, job-market monitoring, or HR analytics with standardized job-listing records.",
+    "deploymentKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDYfwSt0yIkyXupSdAT1R4AIpDKAdjC1mVpiSwNUowgKz1b1CalIfXT7ijRHUrRsE06PX8KsjHezO6VdvDD1VDRF/3xbXN7F/4a/lYiAy4oOpoaGkCZu5AgvPXytgdUfwHOFnBa1eRoVHwEIg/CgEykgjyvDdKlYzQY+NLDj4YVMUKQYPufKVnw5cM9DSi39mKtFFAIXzm0x/ZDT7CjwR3nwDQ09Q+R6oB7Y7t8/PrBztAuIPa4vBSos14NMM5pF5EEtq+9OLEMVhymAtwMIfk/D39YOsZcNIGPd1W/BWuJrU6eb/f1nzU42oRjW6YWBDKkshv6LVGZ7zvhtQcp9xHX \n"
+  }
+}

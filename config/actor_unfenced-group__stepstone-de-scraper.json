@@ -1,0 +1,103 @@
+{
+  "id": "unfenced-group/stepstone-de-scraper",
+  "title": "Stepstone.de Germany Scraper",
+  "input_schema": "{\n  \"schemaVersion\": 1,\n  \"title\": \"stepstone-de-scraper Input\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"searchQuery\": {\n      \"type\": \"string\",\n      \"editor\": \"textfield\",\n      \"default\": \"\",\n      \"description\": \"searchQuery.\",\n      \"title\": \"Search Query\"\n    },\n    \"location\": {\n      \"type\": \"string\",\n      \"editor\": \"textfield\",\n      \"default\": \"\",\n      \"description\": \"location.\",\n      \"title\": \"Location\"\n    },\n    \"radius\": {\n      \"type\": \"integer\",\n      \"editor\": \"number\",\n      \"default\": 40,\n      \"minimum\": 0,\n      \"description\": \"Numeric filter: radius.\",\n      \"title\": \"Radius\"\n    },\n    \"maxItems\": {\n      \"type\": \"integer\",\n      \"editor\": \"number\",\n      \"default\": 5,\n      \"minimum\": 0,\n      \"description\": \"Maximum number of results (0 = no limit).\",\n      \"title\": \"Max Items\"\n    },\n    \"daysOld\": {\n      \"type\": \"integer\",\n      \"editor\": \"number\",\n      \"description\": \"Only return items published within the last N days. Leave blank for all.\",\n      \"minimum\": 1,\n      \"title\": \"Days Old\"\n    },\n    \"skipReposts\": {\n      \"type\": \"boolean\",\n      \"default\": false,\n      \"description\": \"Enable skipReposts.\",\n      \"title\": \"Skip Reposts\"\n    },\n    \"startUrls\": {\n      \"type\": \"array\",\n      \"editor\": \"json\",\n      \"items\": {\n        \"type\": \"string\"\n      },\n      \"default\": [],\n      \"description\": \"Filter by startUrls.\",\n      \"title\": \"Start Urls\"\n    }\n  }\n}",
+  "raw": {
+    "id": "Z0dfGTUb941w8FOae",
+    "userId": "hsXyesocrQdFMkSSJ",
+    "name": "stepstone-de-scraper",
+    "username": "unfenced-group",
+    "description": "Scrape stepstone.de for structured German job data: titles, companies, salary ranges & full descriptions (HTML, text, Markdown). 50,000+ listings with employment type, location and keyword filters. Repost detection & daysOld filtering. No API key required.",
+    "isPublic": true,
+    "createdAt": "2026-03-28 15:50:51.523000+00:00",
+    "modifiedAt": "2026-04-30 17:47:07.471000+00:00",
+    "taggedBuilds": {
+      "latest": {
+        "buildId": "I7nk5XsiLFHvlAGNF",
+        "finishedAt": "2026-04-29 09:26:17.740000+00:00",
+        "buildNumberInt": 93,
+        "buildNumber": "0.0.93"
+      }
+    },
+    "stats": {
+      "totalBuilds": 93,
+      "totalRuns": 307,
+      "totalUsers": 37,
+      "totalUsers7Days": 10,
+      "totalUsers30Days": 18,
+      "totalUsers90Days": 18,
+      "lastRunStartedAt": "2026-05-03 22:00:42.858000+00:00",
+      "actorReviewCount": 0,
+      "actorReviewRating": 0,
+      "bookmarkCount": 2,
+      "publicActorRunStats30Days": {
+        "ABORTED": 2,
+        "FAILED": 26,
+        "SUCCEEDED": 124,
+        "TIMED-OUT": 21,
+        "TOTAL": 173
+      }
+    },
+    "versions": [
+      {
+        "versionNumber": "0.0",
+        "sourceType": "SOURCE_FILES",
+        "buildTag": "latest"
+      }
+    ],
+    "defaultRunOptions": {
+      "build": "latest",
+      "timeoutSecs": 3600,
+      "memoryMbytes": 256
+    },
+    "exampleRunInput": {
+      "body": "{ \"helloWorld\": 123 }",
+      "contentType": "application/json; charset=utf-8"
+    },
+    "categories": [
+      "JOBS",
+      "AUTOMATION",
+      "DEVELOPER_TOOLS"
+    ],
+    "isDeprecated": false,
+    "title": "Stepstone.de Germany Scraper",
+    "pictureUrl": "https://apify-image-uploads-prod.s3.us-east-1.amazonaws.com/hsXyesocrQdFMkSSJ-actor-Z0dfGTUb941w8FOae-2OjfdfrEOi-download_%282%29.jpg",
+    "seoTitle": "Stepstone Germany Scraper — German Job Listings & Salary",
+    "seoDescription": "Scrape stepstone.de for structured German job data. Titles, companies, salaries & descriptions. 50k+ listings. No API key required.",
+    "pricingInfos": [
+      {
+        "minimalMaxTotalChargeUsd": null,
+        "pricingModel": "PAY_PER_EVENT",
+        "isPriceChangeNotificationSuppressed": false,
+        "pricingPerEvent": {
+          "actorChargeEvents": {
+            "apify-actor-start": {
+              "eventTitle": "Actor Start",
+              "eventDescription": "Charged when the Actor starts running. Number of events charged depends on Actor memory (one event per GB, minimum one event).",
+              "isOneTimeEvent": true,
+              "eventPriceUsd": 5e-05
+            },
+            "apify-default-dataset-item": {
+              "eventTitle": "result",
+              "eventDescription": "Single result in the default dataset.",
+              "eventPriceUsd": 0.0015,
+              "isPrimaryEvent": true
+            }
+          }
+        },
+        "startedAt": "2026-03-28 17:39:19.429000+00:00",
+        "createdAt": "2026-03-28 17:39:19.639000+00:00",
+        "apifyMarginPercentage": 0.2
+      }
+    ],
+    "notice": "UNDER_MAINTENANCE",
+    "isCritical": false,
+    "isGeneric": false,
+    "hasNoDataset": false,
+    "isSourceCodeHidden": true,
+    "standbyUrl": null,
+    "actorPermissionLevel": "LIMITED_PERMISSIONS",
+    "readmeSummary": "## Stepstone.de Scraper\n\nScrapes structured job listings from Stepstone.de (Germany) to produce normalized, searchable job data for analysis and integrations. The Actor extracts core listing metadata (unique ID, direct URL, job title, employer, full location including city and country code, contract type, work schedule), structured salary information (minimum/maximum, currency, and pay period when published), publication dates in human and ISO formats, a content hash for change detection, a one-line human summary, change-status markers, repost metadata (original publish date and URL) and timestamps. It can retrieve full job descriptions in HTML, plain text, and Markdown, performs cross-run deduplication with a 90-day TTL, supports targeted scraping via search/location/date filters or direct Stepstone.de search/category URLs, and includes automatic retry with exponential backoff. No third-party credentials are required.\n\n## Use cases\n\n- Targeted searches for specific roles and locations (e.g., software engineer openings in a given city/region).  \n- Bulk harvesting of job listings across Germany for market analysis or aggregation.  \n- Extraction and normalization of salary ranges, currency codes, and salary periods for compensation research.  \n- Retrieval of full job descriptions in HTML, plain text, or Markdown for content analysis, parsing, or NLP.  \n- Creation of daily/new-listings feeds with repost filtering using cross-run deduplication.  \n- Direct scraping of specific Stepstone.de search or category pages for precise result sets.  \n- Change detection and tracking of listing updates via content hashing and change-status metadata.",
+    "deploymentKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCorz3irCMq/LVZGtm6wvgL7V3Z04pnDv2br6fFtk9eDgDdnJqsHpteRmABbmb59qsWinXEvOA8Qc977FceFCmvwbDnl5fJ8Q/TmcDcMWvSEI2ut8FvR6/xrbuYFO6xo/J+N1Ogmz4mxsG1KVX36FYFj4HWO1Q8F3oMotfOzYTNdOFyci4T+T836oYTWw/jjSyegFTj6tmZVsJeuiDyEHdRUTAObxuLlXDxPgGJwZxHMRxpOHuDxqrt4QqclMRKrM1njGvQJ9xUBh6lWbox0aI6w18UuqeMZzFmbbaopoYWmyGG6ooB7HIyidO+cs1k3YxyInnzAwi3UZHPOjK+c6Rz \n"
+  }
+}
