@@ -84,9 +84,13 @@ def compute(tech_signals: dict, cfg: dict, *, now_year: int) -> Tuple[Optional[i
 
     # 1) Transport / Sicherheit (max 3)
     ts = 0.0
-    if tech_signals.get("scheme") == "https":
+    tls_defekt = bool(tech_signals.get("tls_insecure"))
+    if tech_signals.get("scheme") == "https" and not tls_defekt:
         ts += k["transport_sicherheit"]["https_mit_redirect"]
         bd["evidenz"].append("https+redirect" if tech_signals.get("http_to_https_redirect") else "https")
+    elif tls_defekt:
+        # defektes/abgelaufenes Zertifikat: kein Transport-Bonus, dafür Lead-Signal.
+        bd["evidenz"].append("tls_defekt")
     else:
         bd["evidenz"].append("nur_http")
     if "strict-transport-security" in headers:

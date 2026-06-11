@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import ssl
 from datetime import datetime, timezone
 from urllib.parse import urldefrag, urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -75,7 +76,10 @@ def _classify_links(home_html: str, base_url: str, base_host: str, page_types: d
         href = a.attributes.get("href")
         if not href:
             continue
-        url = urldefrag(urljoin(base_url, href))[0]
+        try:
+            url = urldefrag(urljoin(base_url, href))[0]
+        except ValueError:
+            continue  # kaputter href (z.B. "Invalid IPv6 URL") darf den Crawl nicht killen
         if not url.startswith("http") or not _same_site(url, base_host):
             continue
         text = (a.text() or "").strip().lower()
@@ -94,7 +98,7 @@ async def _fetch(client: httpx.AsyncClient, url: str, max_bytes: int):
     try:
         r = await client.get(url)
     except (httpx.HTTPError, UnicodeError) as e:
-        return None, type(e).__name__
+        return None, f"{type(e).__name__}: {e}"  # volle Meldung für TLS-/Protokoll-Klassifikation
     content = r.text if len(r.content) <= max_bytes else r.content[:max_bytes].decode(r.encoding or "utf-8", "ignore")
     return r, content
 
@@ -111,8 +115,78 @@ async def _load_robots(client: httpx.AsyncClient, scheme: str, host: str) -> Rob
     return rp
 
 
+def _is_tls_error(s: str) -> bool:
+    sl = (s or "").lower()
+    return any(x in sl for x in ("certificate_verify", "dh_key_too_small",
+                                 "certificate", "ssl", "tlsv1"))
+
+
+def _is_http2_error(s: str) -> bool:
+    sl = (s or "").lower()
+    return "streamreset" in sl or "remoteprotocol" in sl or "protocolerror" in sl
+
+
+def _conn_error_label(s: str) -> str:
+    """Grobe Kategorie aus einer httpx-Fehlermeldung fürs diagnostische error-Feld."""
+    sl = (s or "").lower()
+    if "certificate_verify" in sl or "certificate" in sl:
+        return "tls_zertifikat_defekt"
+    if "dh_key_too_small" in sl or "ssl" in sl or "tlsv1" in sl:
+        return "tls_defekt"
+    if _is_http2_error(sl):
+        return "http2_protokoll"
+    if "timeout" in sl or "timed out" in sl:
+        return "timeout"
+    if "getaddrinfo" in sl or "name or service" in sl or "nodename" in sl:
+        return "dns_unbekannt"
+    if "connect" in sl:
+        return "connect_fehler"
+    return "startseite_nicht_erreichbar"
+
+
+def _insecure_ssl_context() -> ssl.SSLContext:
+    """Permissiver Context für TLS-defekte Zielserver: Verify aus (abgelaufene/
+    unvollständige Cert-Chain) UND SECLEVEL runter (zu schwacher DH-Key)."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+    except ssl.SSLError:
+        pass
+    return ctx
+
+
+def _new_client(http2: bool, secure: bool, timeout, headers) -> httpx.AsyncClient:
+    verify = True if secure else _insecure_ssl_context()
+    return httpx.AsyncClient(http2=http2, verify=verify, follow_redirects=True,
+                             timeout=timeout, headers=headers, max_redirects=5)
+
+
+async def _fetch_home(client, host, max_bytes):
+    """Startseite holen: erst http:// (Redirect-Erkennung), dann https://.
+    Rückgabe (resp, html, scheme, redirect_to_https, err_str)."""
+    last_err = None
+    for candidate in (f"http://{host}", f"https://{host}"):
+        resp, body = await _fetch(client, candidate, max_bytes)
+        if resp is not None and resp.status_code < 400 and body:
+            scheme = urlparse(str(resp.url)).scheme
+            r2h = candidate.startswith("http://") and scheme == "https"
+            return resp, body, scheme, r2h, None
+        if resp is None:
+            last_err = body  # _fetch liefert bei Fehler (None, "Typ: meldung")
+    return None, None, None, None, last_err
+
+
 async def crawl_domain(website: str, cfg: dict, *, logger=None) -> dict:
-    """Crawlt eine Domain. Rückgabe: {pages: [...], tech_signals: {...}, error: str|None}."""
+    """Crawlt eine Domain. Rückgabe: {pages: [...], tech_signals: {...}, error: str|None}.
+
+    Verbindungs-Strategie: strikt zuerst (HTTP/2, TLS-Verify an). Bei TLS-Fehler
+    (defektes/abgelaufenes Zertifikat, zu schwacher Schlüssel) Retry mit permissivem
+    SSL-Context und Markierung tls_insecure -> die Seite ist crawlbar, der TLS-Defekt
+    fließt als Modernitäts-Malus und Lead-Signal ein. Bei HTTP/2-Protokollabbruch
+    Retry ohne HTTP/2 (http2_disabled).
+    """
     limits = cfg["limits"]
     page_types = cfg["page_types"]
     host = normalize_host(website)
@@ -126,26 +200,36 @@ async def crawl_domain(website: str, cfg: dict, *, logger=None) -> dict:
     headers = {"User-Agent": ua}
     max_bytes = int(limits["max_bytes_per_page"])
 
-    async with httpx.AsyncClient(
-        http2=True, follow_redirects=True, timeout=timeout, headers=headers,
-        max_redirects=5,
-    ) as client:
-        # Startseite: erst http:// (für Redirect-Erkennung), dann https://.
-        home_resp = home_html = None
-        scheme = "http"
-        redirect_to_https = False
-        for candidate in (f"http://{host}", f"https://{host}"):
-            resp, body = await _fetch(client, candidate, max_bytes)
-            if resp is not None and resp.status_code < 400 and body:
-                home_resp, home_html = resp, body
-                final = str(resp.url)
-                scheme = urlparse(final).scheme
-                redirect_to_https = candidate.startswith("http://") and scheme == "https"
-                break
-        if home_resp is None:
-            result["error"] = "startseite_nicht_erreichbar"
-            return result
+    # Strikt, dann gezielt degradiert je nach Fehlertyp.
+    degraded: dict = {}
+    client = _new_client(True, True, timeout, headers)
+    resp, home_html, scheme, redirect_to_https, err = await _fetch_home(client, host, max_bytes)
+    if resp is None:
+        await client.aclose()
+        client = None
+        if _is_tls_error(err):
+            client = _new_client(True, False, timeout, headers)
+            degraded = {"tls_insecure": True}
+        elif _is_http2_error(err):
+            client = _new_client(False, True, timeout, headers)
+            degraded = {"http2_disabled": True}
+        if client is not None:
+            resp, home_html, scheme, redirect_to_https, err = await _fetch_home(client, host, max_bytes)
+            # Deckt der erste Fallback den jeweils anderen Defekt auf: beides aus.
+            if resp is None and (_is_tls_error(err) or _is_http2_error(err)):
+                await client.aclose()
+                client = _new_client(False, False, timeout, headers)
+                degraded = {"tls_insecure": True, "http2_disabled": True}
+                resp, home_html, scheme, redirect_to_https, err = await _fetch_home(client, host, max_bytes)
 
+    if resp is None:
+        if client is not None:
+            await client.aclose()
+        result["error"] = _conn_error_label(err)
+        return result
+
+    try:
+        home_resp = resp
         base_url = str(home_resp.url)
         base_host = urlparse(base_url).netloc
         if limits.get("respect_robots", True):
@@ -175,6 +259,7 @@ async def crawl_domain(website: str, cfg: dict, *, logger=None) -> dict:
             "copyright_year": _copyright_year(home_html),
             "last_modified_year": _year_from_http_date(lm) if lm else None,
             "final_url": base_url,
+            **degraded,
         }
         result["tech_signals"] = tech
 
@@ -201,15 +286,17 @@ async def crawl_domain(website: str, cfg: dict, *, logger=None) -> dict:
                 result["pages"].append({"url": url, "page_type": ptype, "http_status": None,
                                         "text": "", "error": "robots"})
                 continue
-            resp, body = await _fetch(client, url, max_bytes)
-            if resp is None or not body:
+            resp2, body = await _fetch(client, url, max_bytes)
+            if resp2 is None or not body:
                 result["pages"].append({"url": url, "page_type": ptype, "http_status": None,
                                         "text": "", "error": "fetch_failed"})
                 continue
             result["pages"].append({
-                "url": str(resp.url), "page_type": ptype, "http_status": resp.status_code,
+                "url": str(resp2.url), "page_type": ptype, "http_status": resp2.status_code,
                 "text": trafilatura.extract(body) or "", "error": None,
             })
+    finally:
+        await client.aclose()
 
     if logger:
         logger.log("crawled", host=host, pages=len(result["pages"]),

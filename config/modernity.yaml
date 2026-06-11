@@ -1,10 +1,11 @@
 # Website-Modernitäts-Score (0-10), rein deterministisch aus Crawl-Signalen.
 # Summe der Komponenten, geklemmt auf [0, 10], gerundet. Version in modernity_breakdown.
-version: "2026-06-11.2"
+version: "2026-06-11.3"
 
 komponenten:
   transport_sicherheit:          # max 3
     https_mit_redirect: 1.5      # HTTPS erreichbar UND http->https-Redirect; nur HTTP => 0
+                                 # tls_insecure (defektes/abgelaufenes Zertifikat) => kein https-Bonus
     hsts: 0.5
     http2_oder_3: 1.0
 
