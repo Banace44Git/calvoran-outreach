@@ -1,0 +1,47 @@
+# Modell-Router-Konfiguration. Kein Backend ist im Code hartverdrahtet.
+# ENV-Overrides: ${VAR:-default}-Syntax wird vom config-Loader aufgelöst.
+
+backends:
+  gemma_local:
+    type: ollama
+    host: ${OLLAMA_HOST:-http://127.0.0.1:11434}
+    model: gemma4:26b            # 48 GB RAM -> 26B A4B; in P0 final entschieden
+    endpoint: /api/chat          # nativ, NICHT /v1 (Ollama-Fallstrick: format-Support)
+    think: false                 # Reasoning aus, sonst leerer content (Token-Budget im Thinking)
+    options:
+      num_ctx: 16384             # Default 4K ist zu klein -> Truncation/Halluzination
+      temperature: 0.0
+    timeout_s: 180
+
+  haiku:
+    type: anthropic
+    model: claude-haiku-4-5-20251001
+    max_tokens: 1800
+    temperature: 0.0
+
+  sonnet:
+    type: anthropic
+    model: claude-sonnet-4-6
+    max_tokens: 2200
+    temperature: 0.0
+
+# Aufgabenteilung (Startbelegung, datenbasiert in P0 anpassbar).
+tasks:
+  page_classify:
+    primary: heuristic
+    fallback: gemma_local
+  dossier_score_0_1:            # Masse (~4.900, Score 0/1)
+    primary: gemma_local
+    escalate: haiku
+  dossier_score_2_3:            # Welle 1 (1.851, Score 2/3)
+    primary: haiku
+    sample_to: sonnet
+    sample_pct: 5
+  ansprache_saetze:
+    primary: sonnet
+  hermes_summary:
+    primary: gemma_local
+
+repair:
+  max_repair_retries: 1
+  escalate_after_failures: 2

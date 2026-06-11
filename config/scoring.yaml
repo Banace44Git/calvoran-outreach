@@ -1,0 +1,52 @@
+# Deterministisches Bedarfs-Scoring. Gewichte nach Konzept §3.3.
+# Die Version fliesst in scores.scoring_version (Reproduzierbarkeit).
+version: "2026-06-11.1"
+
+anker:
+  bilanzsumme_band:
+    min_eur: 1_500_000
+    max_eur: 10_000_000
+    requires: [ek_quote_pct]      # EK-Quote muss vorhanden sein
+    punkte: 2
+  mitarbeiter_band:
+    min: 10
+    max: 50
+    punkte: 2
+  gewinn_cagr_positiv:
+    punkte: 1
+  fokus_wz:
+    punkte: 1
+
+nachfolge:
+  gf_alter_min:
+    schwelle_jahre: 58            # aus gf_geburtsdatum zum scored_at berechnet
+    punkte: 3
+  gf_name_in_firmenname:
+    punkte: 1
+  familienhinweis:               # signals(signal_type=familienunternehmen)
+    punkte: 1
+  nur_ein_gf:                    # anzahl_gf == 1
+    punkte: 1
+
+web_bedarf:
+  keine_kaufm_funktion:          # dossier.fuehrungsstruktur.kaufmaennische_funktion_besetzt == false
+    punkte: 1
+  offene_kaufm_stelle:           # Buchhaltung / kaufm. Leitung / Controlling
+    punkte: 2
+  zweite_ebene_unsichtbar:       # dossier.fuehrungsstruktur.zweite_ebene_sichtbar == false
+    punkte: 1
+
+abzuege_ko:
+  holding_flag:        {ko: true}
+  konzerntochter:      {ko: true}    # dossier.negativ_filter.tochter_eines_konzerns
+  insolvenz:           {ko: true}    # dossier.negativ_filter.insolvenz_hinweis
+  reiner_onlineshop:   {punkte: -3}  # dossier.negativ_filter.reiner_onlineshop
+
+klassen:
+  A: {min_punkte: 9}
+  B: {min_punkte: 5}
+  C: {min_punkte: 0}
+
+# WZ-2-Steller in Fokus-Branchen (Bau, Metall, Maschinenbau, Großhandel, IT, Gebäudetechnik).
+# In Phase 4 gegen die reale Verteilung final justieren.
+fokus_wz_liste: ["41", "42", "43", "25", "28", "46", "62", "33"]

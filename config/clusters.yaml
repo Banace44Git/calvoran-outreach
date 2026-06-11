@@ -1,0 +1,27 @@
+# Deterministische Clusterung: Branchen-Makrocluster (WZ-2-Steller) x Größenband.
+# cluster_key = "<makrocluster>__<groessenband>" -> Briefvariante.
+
+makrocluster:                    # WZ-2-Steller -> Makrocluster (erste Trefferregel gewinnt)
+  bau_gebaeudetechnik:    ["41", "42", "43"]
+  produzierend:           ["10", "11", "13", "16", "20", "22", "23", "24", "25", "26", "27", "28", "29", "31", "32", "33"]
+  grosshandel_distribution: ["45", "46", "49", "52"]
+  it_dienstleistung:      ["58", "59", "61", "62", "63", "69", "70", "71", "72", "73", "74"]
+  handel_b2c:             ["47"]
+  gesundheit_soziales:    ["86", "87", "88"]
+  # rest = Fallback, wenn kein WZ-2-Steller passt
+
+groessenband:                    # über Bilanzsumme + Mitarbeiter (Proxy statt Umsatz)
+  klein:        {bilanz_max_eur: 2_500_000,  ma_max: 20}
+  kern:         {bilanz_max_eur: 6_000_000,  ma_max: 50}
+  oberes_band:  {bilanz_max_eur: 10_000_000, ma_max: 250}
+  # über 10 Mio / 250 MA -> oberes_band (Obergrenze offen)
+
+# Briefvarianten-Schmerzpunkte je Makrocluster (Konzept §4). Größenband steuert das Angebot.
+schmerzpunkt:
+  bau_gebaeudetechnik:     "Projektbewertung, unfertige Leistungen, Nachträge"
+  produzierend:            "Auftragsbestand, Kundenkonzentration, Materialmarge"
+  grosshandel_distribution: "Lager und Working Capital, Lieferantenabhängigkeit"
+  it_dienstleistung:       "wiederkehrende Umsätze, Personalbindung, Projektmarge"
+  handel_b2c:              "Standort- und Flächenproduktivität, Online-Anteil"
+  gesundheit_soziales:     "Regulierung, Personalquote, Auslastung"
+  rest:                    "Verkaufsreife allgemein, Inhaberabhängigkeit"

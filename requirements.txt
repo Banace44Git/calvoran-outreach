@@ -3,3 +3,11 @@ supabase>=2.5.0
 python-dotenv>=1.0.0
 anthropic>=0.40.0
 tqdm>=4.66.0
+
+# Outreach-Pipeline (Phase 0-2): Crawler, Modernität, Extraktion, Configs
+httpx[http2]>=0.27.0     # async-Crawler, HTTP/2 (zieht h2)
+trafilatura>=2.0.0       # Haupttext-Extraktion je Seite
+selectolax>=0.4.0        # schnelles HTML-Parsing (Nav-Linkauswahl)
+PyYAML>=6.0              # config/*.yaml
+pydantic>=2.0           # Dossier-Schemas (calvoran/schemas.py)
+# playwright>=1.40       # Welle-2-JS-Fallback (separat: playwright install chromium)

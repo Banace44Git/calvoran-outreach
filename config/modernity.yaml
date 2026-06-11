@@ -1,0 +1,50 @@
+# Website-Modernitäts-Score (0-10), rein deterministisch aus Crawl-Signalen.
+# Summe der Komponenten, geklemmt auf [0, 10], gerundet. Version in modernity_breakdown.
+version: "2026-06-11.1"
+
+komponenten:
+  transport_sicherheit:          # max 3
+    https_mit_redirect: 1.5      # HTTPS erreichbar UND http->https-Redirect; nur HTTP => 0
+    hsts: 0.5
+    http2_oder_3: 1.0
+
+  stack_aktualitaet:             # max 3
+    framework_modern: 2.0        # Next/React/Vue/Nuxt/Svelte/Astro, Shopware 6, TYPO3>=11, akt. WP
+    framework_unbekannt: 1.0     # kein klares Signal -> Mittelwert
+    framework_veraltet: 0.0      # TYPO3<=7, altes Joomla, Tabellenlayout, FrontPage
+    cdn_oder_security_header: 1.0  # Cloudflare/Fastly/Akamai oder CSP
+
+  mobile_responsive:             # max 1
+    viewport_responsive: 1.0
+
+  rich_media_interaktiv:         # max 2
+    video: 1.0                   # <video> oder YouTube/Vimeo-Embed
+    interaktiv: 1.0              # canvas/webgl, Web Components, SPA-Hydration, Animationslib, JS-Formvalidierung
+
+  aktualitaet_pflege:            # max 1
+    aktuell: 1.0                 # Copyright-Jahr aktuell ODER Last-Modified < 12 Monate
+    veraltet_ab_jahre: 3         # >= 3 Jahre alt -> 0
+
+# Fingerprints für die Detektion (Substring-Match, case-insensitive).
+fingerprints:
+  framework_modern:
+    - "next.js"
+    - "_next/"
+    - "react"
+    - "vue"
+    - "nuxt"
+    - "svelte"
+    - "astro"
+    - "gatsby"
+    - "shopware 6"
+    - "generator: shopware"
+  framework_veraltet:
+    - "typo3 6"
+    - "typo3 7"
+    - "joomla! 1"
+    - "joomla! 2"
+    - "frontpage"
+    - "dreamweaver"
+  cdn_header_keys: ["cf-ray", "x-served-by", "x-akamai", "server: cloudflare"]
+  video_markers: ["<video", "youtube.com/embed", "youtu.be/", "player.vimeo.com"]
+  interaktiv_markers: ["<canvas", "webgl", "<template", "custom-element", "data-reactroot", "gsap", "framer-motion", "aos.js"]

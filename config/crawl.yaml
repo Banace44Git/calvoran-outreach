@@ -1,0 +1,26 @@
+# Crawler-Konfiguration (Phase 2). Navigations-Heuristik + technische Leitplanken.
+
+limits:
+  pages_per_domain: 10           # 6-10 Zielseiten, keine Vollcrawls
+  request_spacing_s: 1.0         # 1 Request/Sekunde/Domain
+  domain_concurrency: 15         # 10-20 Domains parallel
+  timeout_s: 15
+  max_bytes_per_page: 3_000_000  # Schutz gegen riesige Seiten
+  user_agent: "CalvoranResearchBot/1.0 (+https://calvoran.com; Marktrecherche; Kontakt: kontakt@calvoran.com)"
+  respect_robots: true
+
+# Seitentyp -> Keywords in Navigationslinks (Linktext ODER URL-Pfad), case-insensitive.
+# Reihenfolge = Priorität bei der Auswahl, wenn pages_per_domain knapp wird.
+page_types:
+  home:       []                 # immer die Startseite
+  about:      ["über uns", "ueber-uns", "unternehmen", "ueberuns", "about", "geschichte", "philosophie", "wir-über-uns"]
+  team:       ["team", "geschäftsführung", "geschaeftsfuehrung", "management", "vorstand", "ansprechpartner", "mitarbeiter"]
+  karriere:   ["karriere", "jobs", "stellen", "stellenangebote", "career", "offene-stellen"]
+  produkte:   ["produkte", "leistungen", "leistung", "services", "portfolio", "angebot", "lösungen", "loesungen"]
+  referenzen: ["referenzen", "kunden", "projekte", "case", "erfolge"]
+  news:       ["news", "aktuelles", "presse", "blog", "neuigkeiten"]
+  impressum:  ["impressum", "imprint", "kontakt"]
+
+# Extraktions-Priorität fürs Token-Budget (Konzept §3.2): Über uns/Team/Karriere vor News.
+extract_priority: ["about", "team", "karriere", "produkte", "home", "referenzen", "impressum", "news"]
+max_extract_tokens: 10000        # Input je Firma kappen
