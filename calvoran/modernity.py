@@ -18,11 +18,53 @@ Erwartete tech_signals (vom Crawler je Firma aggregiert):
 
 from __future__ import annotations
 
+import re
 from typing import Optional, Tuple
+
+# Versions werden ausschließlich aus dem generator-Meta gelesen (zuverlässig),
+# nicht aus dem HTML — sonst matchen Copyright-Jahre ("1998-2026 ... TYPO3").
+_WP_RE = re.compile(r"wordpress[ /]*(\d+)", re.I)
+_TYPO3_RE = re.compile(r"typo3[^0-9]{0,8}(\d+)", re.I)
+_JOOMLA_RE = re.compile(r"joomla!?[^0-9]{0,8}(\d+)", re.I)
 
 
 def _has_any(text: str, needles) -> bool:
     return any(str(n).lower() in text for n in needles)
+
+
+def _cms_tier(stack_blob: str, generator: str, fp: dict):
+    """Versions-bewusste CMS-Einstufung. generator-Tag hat Vorrang vor den losen
+    HTML-Fingerprints. Rückgabe (tier, label) oder (None, None), wenn kein CMS
+    eindeutig erkannt wurde (dann greifen die Fingerprint-Listen)."""
+    gen = (generator or "").lower()
+    # Parking-/Platzhalterseiten: kein produktiver Stack -> wie veraltet (0.0).
+    if _has_any(stack_blob, fp.get("parking_markers", [])):
+        return "veraltet", "geparkt"
+    # WordPress: Major-Cutoff 6.0 (Mai 2022). 5.x und älter = veraltet.
+    m = _WP_RE.search(gen)
+    if m:
+        major = int(m.group(1))
+        return ("modern", f"wordpress_{major}") if major >= 6 else ("veraltet", f"wordpress_{major}_alt")
+    if "wordpress" in gen or "wp-content" in stack_blob or "/wp-json" in stack_blob:
+        return "unbekannt", "wordpress_ohne_version"
+    # TYPO3: >=11 modern, <=10 veraltet; ohne Version unbekannt.
+    m = _TYPO3_RE.search(gen)
+    if m:
+        v = int(m.group(1))
+        return ("modern", f"typo3_{v}") if v >= 11 else ("veraltet", f"typo3_{v}_alt")
+    if "typo3" in gen:
+        return "unbekannt", "typo3_ohne_version"
+    # Joomla: >=4 modern, <=3 veraltet (Joomla 3 EOL 08/2023); ohne Version unbekannt.
+    m = _JOOMLA_RE.search(gen)
+    if m:
+        v = int(m.group(1))
+        return ("modern", f"joomla_{v}") if v >= 4 else ("veraltet", f"joomla_{v}_alt")
+    if "joomla" in gen:
+        return "unbekannt", "joomla_ohne_version"
+    # Evergreen-SaaS-Baukästen sind per Definition aktuell.
+    if _has_any(stack_blob, fp.get("framework_evergreen", [])):
+        return "modern", "evergreen_saas"
+    return None, None
 
 
 def compute(tech_signals: dict, cfg: dict, *, now_year: int) -> Tuple[Optional[int], dict]:
@@ -53,20 +95,24 @@ def compute(tech_signals: dict, cfg: dict, *, now_year: int) -> Tuple[Optional[i
     hv = str(tech_signals.get("http_version") or "").upper()
     if "2" in hv or "3" in hv:
         ts += k["transport_sicherheit"]["http2_oder_3"]
-        bd["evidenz"].append(f"http:{hv}")
+        bd["evidenz"].append(f"http_version:{hv}")
     bd["komponenten"]["transport_sicherheit"] = round(ts, 2)
 
-    # 2) Stack-Aktualität (max 3)
+    # 2) Stack-Aktualität (max 3) — generator-basierte CMS-Erkennung zuerst,
+    #    danach die losen HTML-Fingerprints als Fallback.
     st = 0.0
-    if _has_any(stack_blob, fp["framework_veraltet"]):
-        st += k["stack_aktualitaet"]["framework_veraltet"]
-        bd["evidenz"].append("stack_veraltet")
-    elif _has_any(stack_blob, fp["framework_modern"]):
-        st += k["stack_aktualitaet"]["framework_modern"]
-        bd["evidenz"].append("stack_modern")
-    else:
-        st += k["stack_aktualitaet"]["framework_unbekannt"]
-        bd["evidenz"].append("stack_unbekannt")
+    tier, tlabel = _cms_tier(stack_blob, generator, fp)
+    if tier is None:
+        if _has_any(stack_blob, fp["framework_veraltet"]):
+            tier, tlabel = "veraltet", "stack_veraltet"
+        elif _has_any(stack_blob, fp["framework_modern"]):
+            tier, tlabel = "modern", "stack_modern"
+        else:
+            tier, tlabel = "unbekannt", "stack_unbekannt"
+    _tier_key = {"modern": "framework_modern", "veraltet": "framework_veraltet",
+                 "unbekannt": "framework_unbekannt"}[tier]
+    st += k["stack_aktualitaet"][_tier_key]
+    bd["evidenz"].append(tlabel)
     if _has_any(header_blob, fp["cdn_header_keys"]) or "content-security-policy" in headers:
         st += k["stack_aktualitaet"]["cdn_oder_security_header"]
         bd["evidenz"].append("cdn_oder_csp")

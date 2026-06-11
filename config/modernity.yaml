@@ -1,6 +1,6 @@
 # Website-Modernitäts-Score (0-10), rein deterministisch aus Crawl-Signalen.
 # Summe der Komponenten, geklemmt auf [0, 10], gerundet. Version in modernity_breakdown.
-version: "2026-06-11.1"
+version: "2026-06-11.2"
 
 komponenten:
   transport_sicherheit:          # max 3
@@ -39,12 +39,36 @@ fingerprints:
     - "shopware 6"
     - "generator: shopware"
   framework_veraltet:
+    # Versions-CMS (WordPress/TYPO3/Joomla) werden in modernity.py über das
+    # generator-Tag eingestuft; diese Liste ist nur Fallback für klar veraltete
+    # Stacks. "frontpage" entfernt (matchte WP-Body-Klassen wie page-template-frontpage).
     - "typo3 6"
     - "typo3 7"
     - "joomla! 1"
     - "joomla! 2"
-    - "frontpage"
-    - "dreamweaver"
+    - "microsoft frontpage"
+    - "_vti_bin"
+    - "adobe dreamweaver"
+  # Evergreen-SaaS-Baukästen (immer aktuell gehostet) -> modern.
+  framework_evergreen:
+    - "shopify"
+    - "cdn.shopify"
+    - "squarespace"
+    - "wixstatic"
+    - "wix.com"
+    - "jimdo"
+    - "webflow"
+    - "ionos mywebsite"
+    - "godaddy website builder"
+  # Parking-/Platzhalterseiten -> kein produktiver Stack (Score gegen 0).
+  parking_markers:
+    - "united-domains"
+    - "domain im kundenauftrag"
+    - "ud webspace"
+    - "sedoparking"
+    - "this domain is parked"
+    - "domain is parked"
+    - "diese domain wurde"
   cdn_header_keys: ["cf-ray", "x-served-by", "x-akamai", "server: cloudflare"]
   video_markers: ["<video", "youtube.com/embed", "youtu.be/", "player.vimeo.com"]
-  interaktiv_markers: ["<canvas", "webgl", "<template", "custom-element", "data-reactroot", "gsap", "framer-motion", "aos.js"]
+  interaktiv_markers: ["<canvas", "webgl", "<template", "custom-element", "data-reactroot", "gsap", "framer-motion", "aos.js", "owl-carousel", "swiper-", "slick-slider", "animate.css", "wow.js"]
