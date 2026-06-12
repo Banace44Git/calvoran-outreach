@@ -1,6 +1,6 @@
 # Deterministisches Bedarfs-Scoring. Gewichte nach Konzept §3.3.
 # Die Version fliesst in scores.scoring_version (Reproduzierbarkeit).
-version: "2026-06-12.2"
+version: "2026-06-12.3"
 
 anker:
   bilanzsumme_band:
@@ -29,6 +29,8 @@ nachfolge:
     punkte: 1
   nur_ein_gf:                    # anzahl_gf == 1
     punkte: 1
+  nachfolge_intern_geregelt:     # dossier.nachfolge_intern_geregelt -> zusätzl. Abzug zur Neutralisierung
+    punkte: -3                   # nächste Generation steht bereit -> vermutlich kein Verkaufsanlass (über GF-Alter-Bonus-Wegfall hinaus)
 
 web_bedarf:
   keine_kaufm_funktion:          # dossier.fuehrungsstruktur.kaufmaennische_funktion_besetzt == false

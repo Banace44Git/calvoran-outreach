@@ -122,7 +122,7 @@ def score_company(company, dossier: Dossier, scfg, scored_year) -> dict:
         "familienhinweis": _entry(nf["familienhinweis"]["punkte"], fam_ok,
                                   dossier.familienunternehmen.generation),
         "nur_ein_gf": _entry(nf["nur_ein_gf"]["punkte"], anz == 1, anz),
-        "nachfolge_intern_geregelt": _entry(0, intern,
+        "nachfolge_intern_geregelt": _entry(nf["nachfolge_intern_geregelt"]["punkte"], intern,
                                             getattr(dossier, "naechste_generation", None) or ("ja" if intern else None)),
     }
 
@@ -239,7 +239,7 @@ def build_begruendung(company, dossier: Dossier, sigs, res, cluster, ccfg) -> st
     if getattr(dossier, "nachfolge_intern_geregelt", False):
         L.append("  ACHTUNG Nachfolge intern geregelt: "
                  + (getattr(dossier, "naechste_generation", None) or "nächste Generation steht bereit")
-                 + " (GF-Alter-Bonus neutralisiert, vermutlich kein Verkaufsanlass)")
+                 + " (GF-Alter-Bonus neutralisiert + 3 Punkte Abzug, vermutlich kein Verkaufsanlass)")
 
     fs = dossier.fuehrungsstruktur
     L.append("Web-Bedarf: "
