@@ -11,3 +11,7 @@ selectolax>=0.4.0        # schnelles HTML-Parsing (Nav-Linkauswahl)
 PyYAML>=6.0              # config/*.yaml
 pydantic>=2.0           # Dossier-Schemas (calvoran/schemas.py)
 # playwright>=1.40       # Welle-2-JS-Fallback (separat: playwright install chromium)
+
+# Kuratierungs-Dashboard (Phase 5-Vorstufe): Lead-Auswahl vor Ansprache
+streamlit>=1.58          # dashboard/kuratierung.py
+pandas>=2.0              # Tabellen-Backing fürs Dashboard
