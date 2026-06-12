@@ -33,6 +33,14 @@ from calvoran.db import get_client  # noqa: E402
 OUTPUT_DIR = "/Users/johannesbreuers/projects/os/01-projects/fractional-cfo/outreach"
 SELECTION_FILE = Path(OUTPUT_DIR) / "selection.jsonl"
 
+
+def _teur(v):
+    """EUR -> Tausend-EUR, ganzzahlig; None/leer bleibt None."""
+    try:
+        return int(round(float(v) / 1000)) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
 # Köln-Bonn-Default-Region (PLZ-2-Steller); weitere Bereiche (Ruhrgebiet etc.)
 # tauchen automatisch in der Multiselect auf, sobald der Datenbestand wächst.
 REGION_LABELS = {
@@ -77,7 +85,7 @@ def load_frame() -> pd.DataFrame:
         client, "scores", "company_id,score_klasse,score_total,cluster_branche,cluster_key,begruendung")}
     comp = {c["id"]: c for c in _fetch_all(
         client, "companies",
-        "id,name,plz,ort,branche_wz,gf_alter,bilanzsumme_eur,mitarbeiterzahl,website,"
+        "id,name,plz,ort,branche_wz,gf_alter,umsatz_eur,bilanzsumme_eur,mitarbeiterzahl,website,"
         "holding_flag,excluded,dup_of")}
     dossiers = {d["company_id"]: (d.get("dossier") or {}) for d in _fetch_all(
         client, "dossiers", "company_id,dossier")}
@@ -110,7 +118,8 @@ def load_frame() -> pd.DataFrame:
             "familie": bool(fam),
             "nachfolge_signale": "; ".join(nachfolge)[:140],
             "begruendung": (s.get("begruendung") or "")[:300],
-            "bilanz_eur": c.get("bilanzsumme_eur"),
+            "umsatz_teur": _teur(c.get("umsatz_eur")),
+            "bilanz_teur": _teur(c.get("bilanzsumme_eur")),
             "mitarbeiter": c.get("mitarbeiterzahl"),
             "website": c.get("website") or "",
         })
@@ -186,25 +195,32 @@ if state_key not in st.session_state:
     st.session_state[state_key] = load_selection(int(wave))
 selected: set = st.session_state[state_key]
 
-sb.header("Filter")
+# --- Filterleiste über der Tabelle ---
 plz_opts = sorted(df["plz2"].dropna().unique().tolist())
-plz_fmt = lambda p: f"{p} · {REGION_LABELS.get(p, '')}".strip(" ·")
-plz_sel = sb.multiselect("Region (PLZ-Bereich)", plz_opts, default=plz_opts, format_func=plz_fmt)
-
-klassen = sb.multiselect("Score-Klasse", ["A", "B", "C"], default=["A", "B"])
-bwl_sel = sb.multiselect("BWL-Affinität", ["fern", "mittel", "nah"], default=["fern", "mittel"],
-                         help="fern = Idealkunde (technischer Inhaber, kaufm. Lücke). nah = depriorisieren.")
-ohne_berater = sb.checkbox("Berater-Branchen ausschließen", value=True,
-                           help="WZ 69/70/73/74/78 — Berater lassen ungern andere Berater ins Haus.")
-
 cluster_opts = sorted(df["cluster"].dropna().unique().tolist())
-cluster_sel = sb.multiselect("Makrocluster", cluster_opts, default=cluster_opts)
+plz_fmt = lambda p: f"{p} · {REGION_LABELS.get(p, '')}".strip(" ·")
+umax = int(df["umsatz_teur"].dropna().max()) if df["umsatz_teur"].notna().any() else 0
+bmax = int(df["bilanz_teur"].dropna().max()) if df["bilanz_teur"].notna().any() else 0
 
-sb.subheader("Nachfolge-Reife")
-alter_min = sb.slider("GF-Alter ab", min_value=40, max_value=80, value=58, step=1)
-alter_unbekannt = sb.checkbox("Firmen ohne bekanntes GF-Alter einschließen", value=False)
+with st.container(border=True):
+    r1 = st.columns(4)
+    klassen = r1[0].multiselect("Score-Klasse", ["A", "B", "C"], default=["A", "B"])
+    bwl_sel = r1[1].multiselect("BWL-Affinität", ["fern", "mittel", "nah"], default=["fern", "mittel"],
+                                help="fern = Idealkunde (technischer Inhaber, kaufm. Lücke). nah = depriorisieren.")
+    cluster_sel = r1[2].multiselect("Makrocluster", cluster_opts, default=cluster_opts)
+    plz_sel = r1[3].multiselect("Region (PLZ)", plz_opts, default=plz_opts, format_func=plz_fmt)
 
-suche = sb.text_input("Volltextsuche (Name/Ort)", "")
+    r2 = st.columns(4)
+    alter_min = r2[0].slider("GF-Alter ab", 40, 80, 58, 1)
+    umsatz_rng = r2[1].slider("Umsatz T€", 0, umax, (0, umax), step=max(1, umax // 100)) if umax else (0, 0)
+    bilanz_rng = r2[2].slider("Bilanz T€", 0, bmax, (0, bmax), step=max(1, bmax // 100)) if bmax else (0, 0)
+    with r2[3]:
+        ohne_berater = st.checkbox("Berater-Branchen ausschließen", value=True,
+                                   help="WZ 69/70/73/74/78 — Berater lassen ungern andere Berater ins Haus.")
+        alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", value=False)
+        groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", value=True)
+
+    suche = st.text_input("Volltextsuche (Name/Ort)", "")
 
 # --- Filter anwenden ---
 f = df.copy()
@@ -218,6 +234,17 @@ alter_ok = f["gf_alter"].fillna(-1) >= alter_min
 if alter_unbekannt:
     alter_ok = alter_ok | f["gf_alter"].isna()
 f = f[alter_ok]
+
+
+def _size_mask(col, lo, hi, mx):
+    if not mx or (lo <= 0 and hi >= mx):        # Slider unbewegt -> kein Filter
+        return pd.Series(True, index=f.index)
+    m = f[col].between(lo, hi)
+    return (m | f[col].isna()) if groesse_unbekannt else m
+
+
+f = f[_size_mask("umsatz_teur", umsatz_rng[0], umsatz_rng[1], umax)]
+f = f[_size_mask("bilanz_teur", bilanz_rng[0], bilanz_rng[1], bmax)]
 if suche.strip():
     q = suche.strip().lower()
     f = f[f["name"].str.lower().str.contains(q) | f["ort"].str.lower().str.contains(q)]
@@ -238,8 +265,8 @@ c4.metric("gespeichert", len(gespeichert),
 view = f.copy()
 view.insert(0, "wählen", view["company_id"].isin(selected))
 cols = ["wählen", "name", "region", "ort", "branche_wz", "bwl_affinitaet", "cluster",
-        "klasse", "score", "gf_alter", "familie", "nachfolge_signale", "begruendung",
-        "bilanz_eur", "mitarbeiter", "website"]
+        "klasse", "score", "gf_alter", "familie", "umsatz_teur", "bilanz_teur", "mitarbeiter",
+        "nachfolge_signale", "begruendung", "website"]
 edited = st.data_editor(
     view[cols],
     hide_index=True,
@@ -255,7 +282,8 @@ edited = st.data_editor(
         "familie": st.column_config.CheckboxColumn("Fam.", width="small"),
         "nachfolge_signale": st.column_config.TextColumn("Nachfolge-Signale", width="large"),
         "begruendung": st.column_config.TextColumn("Anruf-Briefing (Score)", width="large"),
-        "bilanz_eur": st.column_config.NumberColumn("Bilanz €", format="%d"),
+        "umsatz_teur": st.column_config.NumberColumn("Umsatz T€", format="localized", width="small"),
+        "bilanz_teur": st.column_config.NumberColumn("Bilanz T€", format="localized", width="small"),
         "website": st.column_config.LinkColumn("Web", width="small"),
     },
     disabled=[c for c in cols if c != "wählen"],
