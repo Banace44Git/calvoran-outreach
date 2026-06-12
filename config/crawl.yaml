@@ -13,8 +13,11 @@ limits:
 # Reihenfolge = Priorität bei der Auswahl, wenn pages_per_domain knapp wird.
 page_types:
   home:       []                 # immer die Startseite
-  about:      ["über uns", "ueber-uns", "unternehmen", "ueberuns", "about", "geschichte", "historie", "tradition", "chronik", "meilensteine", "philosophie", "wir-über-uns", "wir-ueber-uns"]
-  team:       ["team", "geschäftsführung", "geschaeftsfuehrung", "management", "vorstand", "ansprechpartner", "mitarbeiter"]
+  # historie VOR about: Substring-Match ("unternehmen" steckt in "unternehmensgeschichte"),
+  # sonst finge about die Chronik-Seite ab. Eigener Typ = eigener Crawl-Slot (1 Link je Typ).
+  historie:   ["unternehmensgeschichte", "firmengeschichte", "unternehmenshistorie", "geschichte", "historie", "familientradition", "tradition", "chronik", "werdegang", "meilensteine", "generationen", "jubiläum", "jubilaeum", "unsere-geschichte", "our-history", "history", "heritage", "our-story"]
+  about:      ["über uns", "ueber-uns", "ueberuns", "über-uns", "wir-über-uns", "wir-ueber-uns", "unternehmen", "das-unternehmen", "unser-unternehmen", "wer wir sind", "wer-wir-sind", "über mich", "ueber-mich", "philosophie", "leitbild", "werte", "profil", "firmenprofil", "unternehmensprofil", "familienunternehmen", "familienbetrieb", "about", "about-us", "who-we-are"]
+  team:       ["team", "geschäftsführung", "geschaeftsfuehrung", "geschäftsleitung", "geschaeftsleitung", "management", "vorstand", "inhaber", "gesellschafter", "ansprechpartner", "mitarbeiter", "unser-team", "das-team"]
   karriere:   ["karriere", "jobs", "stellen", "stellenangebote", "career", "offene-stellen"]
   produkte:   ["produkte", "leistungen", "leistung", "services", "portfolio", "angebot", "lösungen", "loesungen"]
   referenzen: ["referenzen", "kunden", "projekte", "case", "erfolge"]
@@ -22,5 +25,5 @@ page_types:
   impressum:  ["impressum", "imprint", "kontakt"]
 
 # Extraktions-Priorität fürs Token-Budget (Konzept §3.2): Über uns/Team/Karriere vor News.
-extract_priority: ["about", "team", "karriere", "produkte", "home", "referenzen", "impressum", "news"]
+extract_priority: ["about", "historie", "team", "karriere", "produkte", "home", "referenzen", "impressum", "news"]
 max_extract_tokens: 10000        # Input je Firma kappen
