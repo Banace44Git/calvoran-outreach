@@ -13,7 +13,7 @@ limits:
 # Reihenfolge = Priorität bei der Auswahl, wenn pages_per_domain knapp wird.
 page_types:
   home:       []                 # immer die Startseite
-  about:      ["über uns", "ueber-uns", "unternehmen", "ueberuns", "about", "geschichte", "philosophie", "wir-über-uns"]
+  about:      ["über uns", "ueber-uns", "unternehmen", "ueberuns", "about", "geschichte", "historie", "tradition", "chronik", "meilensteine", "philosophie", "wir-über-uns", "wir-ueber-uns"]
   team:       ["team", "geschäftsführung", "geschaeftsfuehrung", "management", "vorstand", "ansprechpartner", "mitarbeiter"]
   karriere:   ["karriere", "jobs", "stellen", "stellenangebote", "career", "offene-stellen"]
   produkte:   ["produkte", "leistungen", "leistung", "services", "portfolio", "angebot", "lösungen", "loesungen"]
