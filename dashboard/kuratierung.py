@@ -102,6 +102,7 @@ def load_frame() -> pd.DataFrame:
         d = dossiers.get(cid) or {}
         nachfolge = d.get("nachfolge_signale") or []
         fam = (d.get("familienunternehmen") or {}).get("hinweis")
+        geregelt = bool(d.get("nachfolge_intern_geregelt"))
         rows.append({
             "company_id": cid,
             "name": c.get("name") or "",
@@ -117,6 +118,8 @@ def load_frame() -> pd.DataFrame:
             "gf_alter": c.get("gf_alter"),
             "familie": bool(fam),
             "nachfolge_signale": "; ".join(nachfolge)[:140],
+            "nachfolge_geregelt": geregelt,
+            "naechste_generation": (d.get("naechste_generation") or "")[:80],
             "begruendung": (s.get("begruendung") or "")[:300],
             "umsatz_teur": _teur(c.get("umsatz_eur")),
             "bilanz_teur": _teur(c.get("bilanzsumme_eur")),
@@ -217,6 +220,8 @@ with st.container(border=True):
     with r2[3]:
         ohne_berater = st.checkbox("Berater-Branchen ausschließen", value=True,
                                    help="WZ 69/70/73/74/78 — Berater lassen ungern andere Berater ins Haus.")
+        nf_geregelt_aus = st.checkbox("Nachfolge geregelt ausblenden", value=True,
+                                      help="Firmen, bei denen die nächste Generation laut Website bereitsteht (kein Verkaufsanlass).")
         alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", value=False)
         groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", value=True)
 
@@ -230,6 +235,8 @@ f = f[f["bwl_affinitaet"].isin(bwl_sel)]
 f = f[f["cluster"].isin(cluster_sel)]
 if ohne_berater:
     f = f[~f["berater"]]
+if nf_geregelt_aus:
+    f = f[~f["nachfolge_geregelt"]]
 alter_ok = f["gf_alter"].fillna(-1) >= alter_min
 if alter_unbekannt:
     alter_ok = alter_ok | f["gf_alter"].isna()
@@ -265,8 +272,8 @@ c4.metric("gespeichert", len(gespeichert),
 view = f.copy()
 view.insert(0, "wählen", view["company_id"].isin(selected))
 cols = ["wählen", "name", "region", "ort", "branche_wz", "bwl_affinitaet", "cluster",
-        "klasse", "score", "gf_alter", "familie", "umsatz_teur", "bilanz_teur", "mitarbeiter",
-        "nachfolge_signale", "begruendung", "website"]
+        "klasse", "score", "gf_alter", "familie", "nachfolge_geregelt", "umsatz_teur",
+        "bilanz_teur", "mitarbeiter", "nachfolge_signale", "begruendung", "website"]
 edited = st.data_editor(
     view[cols],
     hide_index=True,
@@ -280,6 +287,8 @@ edited = st.data_editor(
         "klasse": st.column_config.TextColumn("Kl.", width="small"),
         "gf_alter": st.column_config.NumberColumn("GF-Alter", width="small"),
         "familie": st.column_config.CheckboxColumn("Fam.", width="small"),
+        "nachfolge_geregelt": st.column_config.CheckboxColumn("Nf ger.", width="small",
+                                                              help="nächste Generation steht laut Website bereit"),
         "nachfolge_signale": st.column_config.TextColumn("Nachfolge-Signale", width="large"),
         "begruendung": st.column_config.TextColumn("Anruf-Briefing (Score)", width="large"),
         "umsatz_teur": st.column_config.NumberColumn("Umsatz T€", format="localized", width="small"),

@@ -78,6 +78,8 @@ class Dossier(_Lenient):
     fuehrungsstruktur: Fuehrungsstruktur = Field(default_factory=Fuehrungsstruktur)
     karriere: Karriere = Field(default_factory=Karriere)
     nachfolge_signale: List[str] = Field(default_factory=list)
+    nachfolge_intern_geregelt: bool = False   # nächste Generation steht bereit -> kein Verkaufsanlass
+    naechste_generation: Optional[str] = None  # Name/Beschreibung der bereitstehenden Nachfolge (belegt)
     digitalisierung: Optional[str] = None
     besonderheiten: Optional[str] = None
     tonalitaet_website: Optional[str] = None
@@ -87,8 +89,8 @@ class Dossier(_Lenient):
     konfidenz: Optional[str] = None
 
     @field_validator(
-        "geschaeftsmodell", "kundentyp", "digitalisierung", "besonderheiten",
-        "tonalitaet_website", "konfidenz", mode="before",
+        "geschaeftsmodell", "kundentyp", "naechste_generation", "digitalisierung",
+        "besonderheiten", "tonalitaet_website", "konfidenz", mode="before",
     )
     @classmethod
     def _coerce_str(cls, v):

@@ -106,17 +106,24 @@ def score_company(company, dossier: Dossier, scfg, scored_year) -> dict:
     # --- Nachfolge ---
     alter, alter_q = gf_alter_at(company, scored_year)
     schwelle = _num(nf["gf_alter_min"]["schwelle_jahre"])
-    alter_ok = alter is not None and alter >= schwelle
+    intern = bool(getattr(dossier, "nachfolge_intern_geregelt", False))  # Dossier = SoT
+    neutralisiert = intern and bool(nf["gf_alter_min"].get("neutralisiert_bei_intern_geregelt"))
+    alter_ueber = alter is not None and alter >= schwelle
+    alter_ok = alter_ueber and not neutralisiert    # bereitstehende Nachfolge -> kein Nachfolgedruck
     fam_ok = bool(dossier.familienunternehmen.hinweis)          # Dossier = SoT
     anz = company.get("anzahl_gf")
+    alter_wert = f"{alter} ({alter_q})" if alter is not None else "unbekannt"
+    if alter_ueber and neutralisiert:
+        alter_wert += " — neutralisiert: Nachfolge intern geregelt"
     nachfolge = {
-        "gf_alter_min": _entry(nf["gf_alter_min"]["punkte"], alter_ok,
-                               f"{alter} ({alter_q})" if alter is not None else "unbekannt"),
+        "gf_alter_min": _entry(nf["gf_alter_min"]["punkte"], alter_ok, alter_wert),
         "gf_name_in_firmenname": _entry(nf["gf_name_in_firmenname"]["punkte"],
                                         bool(company.get("gf_name_in_firmenname"))),
         "familienhinweis": _entry(nf["familienhinweis"]["punkte"], fam_ok,
                                   dossier.familienunternehmen.generation),
         "nur_ein_gf": _entry(nf["nur_ein_gf"]["punkte"], anz == 1, anz),
+        "nachfolge_intern_geregelt": _entry(0, intern,
+                                            getattr(dossier, "naechste_generation", None) or ("ja" if intern else None)),
     }
 
     # --- Web-Bedarf (Dossier = SoT) ---
@@ -229,6 +236,10 @@ def build_begruendung(company, dossier: Dossier, sigs, res, cluster, ccfg) -> st
              f"Anzahl GF: {company.get('anzahl_gf')}")
     if dossier.nachfolge_signale:
         L.append("  Signale: " + "; ".join(dossier.nachfolge_signale))
+    if getattr(dossier, "nachfolge_intern_geregelt", False):
+        L.append("  ACHTUNG Nachfolge intern geregelt: "
+                 + (getattr(dossier, "naechste_generation", None) or "nächste Generation steht bereit")
+                 + " (GF-Alter-Bonus neutralisiert, vermutlich kein Verkaufsanlass)")
 
     fs = dossier.fuehrungsstruktur
     L.append("Web-Bedarf: "
@@ -400,6 +411,7 @@ def write_report(audit, args, version, determ) -> Path:
     L.append("|---|---|---|")
     order = ["bilanzsumme_band", "mitarbeiter_band", "gewinn_cagr_positiv", "fokus_wz",
              "gf_alter_min", "gf_name_in_firmenname", "familienhinweis", "nur_ein_gf",
+             "nachfolge_intern_geregelt",
              "keine_kaufm_funktion", "offene_kaufm_stelle", "zweite_ebene_unsichtbar",
              "holding_flag", "konzerntochter", "insolvenz", "reiner_onlineshop"]
     for c in order:

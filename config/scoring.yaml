@@ -1,6 +1,6 @@
 # Deterministisches Bedarfs-Scoring. Gewichte nach Konzept §3.3.
 # Die Version fliesst in scores.scoring_version (Reproduzierbarkeit).
-version: "2026-06-12.1"
+version: "2026-06-12.2"
 
 anker:
   bilanzsumme_band:
@@ -22,6 +22,7 @@ nachfolge:
   gf_alter_min:
     schwelle_jahre: 58            # aus gf_geburtsdatum zum scored_at berechnet
     punkte: 3
+    neutralisiert_bei_intern_geregelt: true   # dossier.nachfolge_intern_geregelt -> +3 entfällt (nächste Generation steht bereit, kein Verkaufsanlass)
   gf_name_in_firmenname:
     punkte: 1
   familienhinweis:               # signals(signal_type=familienunternehmen)

@@ -20,6 +20,12 @@ Regeln:
   Funktion, offene kaufmännische Stelle, Digitalisierung u.a.) trägst du in `belege` einen
   Eintrag ein: signal_type, aussage, ein WÖRTLICHES Zitat (höchstens 25 Wörter) und die
   quelle_url der Seite, von der das Zitat stammt. Ohne Beleg kein Signal.
+- `nachfolge_intern_geregelt`: setze NUR dann true, wenn die nächste Generation namentlich
+  genannt UND bereits ins Unternehmen oder in die Leitung eingebunden ist (z.B. "in vierter
+  Generation", "[Name] ist seit [Jahr] in der Geschäftsleitung", Sohn/Tochter mit
+  einschlägiger Ausbildung im Betrieb). Dann `naechste_generation` mit Name/Kurzbeschreibung
+  füllen und einen Beleg (signal_type "nachfolge_intern_geregelt") setzen. Eine bloße lange
+  Firmentradition OHNE benannte, eingebundene Nachfolge reicht NICHT.
 - `ansprache_hooks`: 2-3 konkrete, firmenspezifische Anknüpfungspunkte für einen Brief.
 - `negativ_filter`: setze insolvenz_hinweis/reiner_onlineshop/tochter_eines_konzerns nur bei
   klarem Beleg auf true.
@@ -38,6 +44,8 @@ Gib ein JSON-Objekt mit GENAU dieser Struktur zurück (keine zusätzlichen Felde
   "fuehrungsstruktur": {"gf_auf_website": ["..."], "zweite_ebene_sichtbar": null, "kaufmaennische_funktion_besetzt": null},
   "karriere": {"offene_stellen": ["..."], "kaufm_stellen": ["..."], "stand": null},
   "nachfolge_signale": ["..."],
+  "nachfolge_intern_geregelt": false,
+  "naechste_generation": null,
   "digitalisierung": "ERP/Shop/Portal-Hinweise, Website-Alter oder null",
   "besonderheiten": "Zertifikate, Auszeichnungen, Jubiläen, Standorte oder null",
   "tonalitaet_website": "nüchtern/traditionell/modern oder null",
