@@ -83,8 +83,10 @@ def score_company(company, dossier: Dossier, scfg, scored_year) -> dict:
     bb = a["bilanzsumme_band"]
     bilanz = company.get("bilanzsumme_eur")
     ek = company.get("ek_quote_pct")
+    min_ek = bb.get("min_ek_pct")
     bilanz_ok = (bilanz is not None and ek is not None
-                 and _num(bb["min_eur"]) <= bilanz <= _num(bb["max_eur"]))
+                 and _num(bb["min_eur"]) <= bilanz <= _num(bb["max_eur"])
+                 and (min_ek is None or ek >= _num(min_ek)))
     mb = a["mitarbeiter_band"]
     ma = company.get("mitarbeiterzahl")
     ma_ok = ma is not None and _num(mb["min"]) <= ma <= _num(mb["max"])

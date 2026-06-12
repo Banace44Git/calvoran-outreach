@@ -2,8 +2,8 @@
 # cluster_key = "<makrocluster>__<groessenband>" -> Briefvariante.
 
 makrocluster:                    # WZ-2-Steller -> Makrocluster (erste Trefferregel gewinnt)
-  bau_gebaeudetechnik:    ["41", "42", "43"]
-  produzierend:           ["10", "11", "13", "16", "20", "22", "23", "24", "25", "26", "27", "28", "29", "31", "32", "33"]
+  bau_gebaeudetechnik:    ["41", "42", "43", "81"]   # 81 = Garten-/Landschaftsbau + Gebaeudebetreuung
+  produzierend:           ["10", "11", "13", "16", "17", "18", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "31", "32", "33"]   # 17/18 Papier/Druck, 21 Pharma
   grosshandel_distribution: ["45", "46", "49", "52"]
   it_dienstleistung:      ["58", "59", "61", "62", "63", "69", "70", "71", "72", "73", "74"]
   handel_b2c:             ["47"]

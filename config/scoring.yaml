@@ -1,12 +1,13 @@
 # Deterministisches Bedarfs-Scoring. Gewichte nach Konzept §3.3.
 # Die Version fliesst in scores.scoring_version (Reproduzierbarkeit).
-version: "2026-06-11.1"
+version: "2026-06-12.1"
 
 anker:
   bilanzsumme_band:
     min_eur: 1_500_000
     max_eur: 10_000_000
     requires: [ek_quote_pct]      # EK-Quote muss vorhanden sein
+    min_ek_pct: 0                  # kein Anker bei negativem EK (Ueberschuldung ist kein Stabilitaets-Signal)
     punkte: 2
   mitarbeiter_band:
     min: 10
