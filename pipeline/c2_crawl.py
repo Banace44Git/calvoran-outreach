@@ -74,6 +74,35 @@ def select_companies(client, *, score, min_score, limit, force):
     return cands[:limit] if limit else cands
 
 
+def select_by_ids(client, ids, limit):
+    """Gezielter Re-Crawl über exakte company-UUIDs (ohne Score-/tech_signals-Filter)."""
+    cols = "id,name,website,domain,prioritaets_score,bilanzsumme_eur"
+    rows, step = [], 200
+    for i in range(0, len(ids), step):
+        r = client.table("companies").select(cols).in_("id", ids[i:i + step]).execute()
+        rows.extend(r.data)
+    rows = [x for x in rows if x.get("website")]
+    rows.sort(key=lambda x: -(x.get("prioritaets_score") or -1))
+    return rows[:limit] if limit else rows
+
+
+def resolve_ids(args):
+    """company-UUIDs aus --ids (kommagetrennt) oder --ids-file (Zeilen ODER JSONL mit 'id')."""
+    import json
+    from pathlib import Path
+    if args.ids:
+        return [x.strip() for x in args.ids.split(",") if x.strip()]
+    if args.ids_file:
+        ids = []
+        for line in Path(args.ids_file).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            ids.append(json.loads(line).get("id") if line.startswith("{") else line)
+        return [x for x in ids if x]
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Persistenz
 # --------------------------------------------------------------------------- #
@@ -250,10 +279,15 @@ async def run(args):
     mod_cfg = config.load("modernity")
     now_year = datetime.now(timezone.utc).year
 
-    cands = select_companies(client, score=args.score, min_score=args.min_score,
-                             limit=args.limit, force=args.force)
-    log.log("c2_selected", n=len(cands), score=args.score, min_score=args.min_score,
-            limit=args.limit, force=args.force)
+    ids = resolve_ids(args)
+    if ids:
+        cands = select_by_ids(client, ids, args.limit)
+        log.log("c2_selected", n=len(cands), mode="ids", n_ids=len(ids), limit=args.limit)
+    else:
+        cands = select_companies(client, score=args.score, min_score=args.min_score,
+                                 limit=args.limit, force=args.force)
+        log.log("c2_selected", n=len(cands), score=args.score, min_score=args.min_score,
+                limit=args.limit, force=args.force)
     print(f"Selektiert: {len(cands)} Firmen.")
     if not cands:
         print("Nichts zu crawlen (alles erledigt oder leere Auswahl).")
@@ -300,6 +334,10 @@ def main():
     ap.add_argument("--min-score", type=float, default=None,
                     help="Nur Firmen mit prioritaets_score >= N (Welle 1: 2)")
     ap.add_argument("--limit", type=int, default=0, help="Max. Firmenzahl (0 = alle)")
+    ap.add_argument("--ids", default=None,
+                    help="Kommagetrennte company-UUIDs (gezielter Re-Crawl, ohne Score-Filter)")
+    ap.add_argument("--ids-file", dest="ids_file", default=None,
+                    help="Datei mit company-UUIDs je Zeile ODER JSONL mit 'id'-Feld")
     ap.add_argument("--batch", type=int, default=30, help="Persistenz-Chunk")
     ap.add_argument("--force", action="store_true",
                     help="Auch bereits gecrawlte (tech_signals gesetzt) erneut crawlen")
