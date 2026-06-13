@@ -46,6 +46,15 @@ def _teur(v):
 def _tri(v):
     return "ja" if v is True else "nein" if v is False else "unbekannt"
 
+
+def _kv_table(pairs):
+    """Kompakte headerlose Key-Value-Tabelle (HTML)."""
+    body = "".join(
+        f"<tr><td style='padding:1px 10px 1px 0;color:#888;white-space:nowrap'>{k}</td>"
+        f"<td style='padding:1px 0;text-align:right'>{v}</td></tr>"
+        for k, v in pairs)
+    return f"<table style='width:100%;font-size:0.9rem;border-collapse:collapse'>{body}</table>"
+
 # Köln-Bonn-Default-Region (PLZ-2-Steller); weitere Bereiche (Ruhrgebiet etc.)
 # tauchen automatisch in der Multiselect auf, sobald der Datenbestand wächst.
 REGION_LABELS = {
@@ -232,6 +241,7 @@ def save_reviews(wave: int, reviews: dict, frame: pd.DataFrame) -> int:
 # UI
 # --------------------------------------------------------------------------- #
 st.set_page_config(page_title="Calvoran — Lead-Kuratierung", layout="wide")
+st.markdown("<style>.block-container{padding-top:1.8rem;}</style>", unsafe_allow_html=True)
 st.title("Calvoran — Lead-Kuratierung für die Ansprache")
 
 df = load_frame()
@@ -436,7 +446,7 @@ with tab_card:
         if row["naechste_generation"]:
             st.info(f"**Nächste Generation:** {row['naechste_generation']}")
 
-        # Kennzahlen + Nachfolge/Bedarf tabellarisch
+        # Kennzahlen / Nachfolge / Bedarf — vier kompakte Spaltengruppen
         def _pct(v):
             return f"{v:.1f}".replace(".", ",") + " %" if pd.notna(v) else "—"
 
@@ -446,28 +456,31 @@ with tab_card:
         def _teur_cell(v):
             return f"{_fmt_teur(v)} T€" if pd.notna(v) else "—"
 
-        left, right = st.columns(2)
-        left.markdown(
-            "| Kennzahl | Wert |\n|:--|--:|\n"
-            f"| Umsatz | {_teur_cell(row['umsatz_teur'])} |\n"
-            f"| Bilanzsumme | {_teur_cell(row['bilanz_teur'])} |\n"
-            f"| EK-Quote | {_pct(row['ek_quote'])} |\n"
-            f"| Mitarbeiter | {_i(row['mitarbeiter'])} |\n"
-            f"| Gewinn-CAGR | {_pct(row['cagr'])} |"
-        )
-        offene = "; ".join(row["kaufm_stellen"]) if row["kaufm_stellen"] else "—"
-        right.markdown(
-            "| Nachfolge / Bedarf | |\n|:--|--:|\n"
-            f"| GF-Alter | {_i(row['gf_alter'])} |\n"
-            f"| GF-Name im Namen | {'ja' if row['gf_name_in_name'] else 'nein'} |\n"
-            f"| Anzahl GF | {_i(row['anzahl_gf'])} |\n"
-            f"| Kaufm. Funktion besetzt | {_tri(row['kaufm_besetzt'])} |\n"
-            f"| 2. Ebene sichtbar | {_tri(row['zweite_ebene'])} |\n"
-            f"| Offene kaufm. Stellen | {offene} |"
-        )
-
         if row["geschaeftsmodell"]:
             st.markdown(f"**Geschäftsmodell:** {row['geschaeftsmodell']}")
+
+        offene = "; ".join(row["kaufm_stellen"]) if row["kaufm_stellen"] else "—"
+        ca, cb, cc, cd = st.columns(4)
+        ca.markdown(_kv_table([
+            ("Umsatz", _teur_cell(row["umsatz_teur"])),
+            ("Bilanzsumme", _teur_cell(row["bilanz_teur"])),
+            ("Mitarbeiter", _i(row["mitarbeiter"])),
+        ]), unsafe_allow_html=True)
+        cb.markdown(_kv_table([
+            ("EK-Quote", _pct(row["ek_quote"])),
+            ("Gewinn-CAGR", _pct(row["cagr"])),
+        ]), unsafe_allow_html=True)
+        cc.markdown(_kv_table([
+            ("GF-Alter", _i(row["gf_alter"])),
+            ("GF-Name", "ja" if row["gf_name_in_name"] else "nein"),
+            ("Anzahl GF", _i(row["anzahl_gf"])),
+        ]), unsafe_allow_html=True)
+        cd.markdown(_kv_table([
+            ("Kaufm. Funktion besetzt", _tri(row["kaufm_besetzt"])),
+            ("2. Ebene sichtbar", _tri(row["zweite_ebene"])),
+            ("Offene kaufm. Stellen", offene),
+        ]), unsafe_allow_html=True)
+
         if row["nachfolge_signale"]:
             st.markdown(f"**Nachfolge-Signale:** {row['nachfolge_signale']}")
 
