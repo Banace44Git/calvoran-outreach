@@ -428,25 +428,6 @@ with tab_card:
             f"{row['region']} · {row['ort']} · {row['plz']}  |  "
             f"WZ {row['branche_wz']} · {row['cluster']} · BWL {row['bwl_affinitaet']}")
 
-        if row["schmerzpunkt"]:
-            st.markdown(f"**Schmerzpunkt (Brief):** {row['schmerzpunkt']}")
-
-        # Flags + Website (klickbar)
-        meta = []
-        if row["familie"]:
-            meta.append("Familienunternehmen")
-        if row["nachfolge_geregelt"]:
-            meta.append("⚠ Nachfolge intern geregelt")
-        if row["berater"]:
-            meta.append("Berater-Branche")
-        if row["website"]:
-            meta.append(f"[🔗 Website]({row['website']})")
-        if meta:
-            st.markdown(" · ".join(meta))
-        if row["naechste_generation"]:
-            st.info(f"**Nächste Generation:** {row['naechste_generation']}")
-
-        # Kennzahlen / Nachfolge / Bedarf — vier kompakte Spaltengruppen
         def _pct(v):
             return f"{v:.1f}".replace(".", ",") + " %" if pd.notna(v) else "—"
 
@@ -456,8 +437,27 @@ with tab_card:
         def _teur_cell(v):
             return f"{_fmt_teur(v)} T€" if pd.notna(v) else "—"
 
+        # Kopf-Textzeilen: einfache Zeilenumbrüche statt Absätze
+        meta = []
+        if row["familie"]:
+            meta.append("Familienunternehmen")
+        if row["nachfolge_geregelt"]:
+            meta.append("⚠ Nachfolge intern geregelt")
+        if row["berater"]:
+            meta.append("Berater-Branche")
+        if row["website"]:
+            meta.append(f"[🔗 Website]({row['website']})")
+        lines = []
+        if row["schmerzpunkt"]:
+            lines.append(f"**Schmerzpunkt (Brief):** {row['schmerzpunkt']}")
+        if meta:
+            lines.append(" · ".join(meta))
         if row["geschaeftsmodell"]:
-            st.markdown(f"**Geschäftsmodell:** {row['geschaeftsmodell']}")
+            lines.append(f"**Geschäftsmodell:** {row['geschaeftsmodell']}")
+        if lines:
+            st.markdown("<br>".join(lines), unsafe_allow_html=True)
+        if row["naechste_generation"]:
+            st.info(f"**Nächste Generation:** {row['naechste_generation']}")
 
         offene = "; ".join(row["kaufm_stellen"]) if row["kaufm_stellen"] else "—"
         ca, cb, cc, cd = st.columns(4)
@@ -498,14 +498,12 @@ with tab_card:
         with st.expander("Briefing-Rohtext (für Anruf)", expanded=False):
             st.text(row["begruendung"] or "—")
 
-        st.divider()
-
         # --- Entscheidung + Notizen (Widget-State je Firma initialisieren) ---
         st.session_state.setdefault(dkey, _STORE_TO_DEC.get(reviews.get(cur_cid, {}).get("decision")))
         st.session_state.setdefault(skey, reviews.get(cur_cid, {}).get("note_self", ""))
         st.session_state.setdefault(kkey, reviews.get(cur_cid, {}).get("note_ki", ""))
 
-        st.radio("Entscheidung", DECISIONS, horizontal=True, key=dkey)
+        st.radio("Entscheidung", DECISIONS, horizontal=True, key=dkey, label_visibility="collapsed")
         cc = st.columns(2)
         cc[0].text_area("Mein Kommentar", key=skey, height=120,
                         placeholder="Notiz für mich (Recherche, Timing, Kontakt …)")
