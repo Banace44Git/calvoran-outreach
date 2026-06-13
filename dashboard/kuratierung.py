@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Projektwurzel auf den Pfad, damit `import calvoran` aus dashboard/ funktioniert.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,10 +118,10 @@ def load_frame() -> pd.DataFrame:
             "score": s.get("score_total"),
             "gf_alter": c.get("gf_alter"),
             "familie": bool(fam),
-            "nachfolge_signale": "; ".join(nachfolge)[:140],
+            "nachfolge_signale": "; ".join(nachfolge),
             "nachfolge_geregelt": geregelt,
-            "naechste_generation": (d.get("naechste_generation") or "")[:80],
-            "begruendung": (s.get("begruendung") or "")[:300],
+            "naechste_generation": d.get("naechste_generation") or "",
+            "begruendung": s.get("begruendung") or "",
             "umsatz_teur": _teur(c.get("umsatz_eur")),
             "bilanz_teur": _teur(c.get("bilanzsumme_eur")),
             "mitarbeiter": c.get("mitarbeiterzahl"),
@@ -130,51 +131,70 @@ def load_frame() -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
-# Auswahl-Persistenz (JSONL je Welle)
+# Review-Persistenz (JSONL je Welle): Entscheidung + Notizen
 # --------------------------------------------------------------------------- #
-def load_selection(wave: int) -> set:
+# Schema je Zeile: {company_id, name, wave, decision, selected, note_self, note_ki,
+#                   decided_at}.  decision ∈ {"lead","uninteressant",null}.
+# selected == (decision == "lead") -> c5_export liest weiterhin selected==true.
+DECISIONS = ["—", "Lead", "uninteressant"]
+_DEC_TO_STORE = {"—": None, "Lead": "lead", "uninteressant": "uninteressant"}
+_STORE_TO_DEC = {None: "—", "lead": "Lead", "uninteressant": "uninteressant"}
+
+
+def _read_lines() -> list:
     if not SELECTION_FILE.exists():
-        return set()
-    sel = set()
+        return []
+    out = []
     for line in SELECTION_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            r = json.loads(line)
+            out.append(json.loads(line))
         except json.JSONDecodeError:
             continue
-        if r.get("wave") == wave and r.get("selected"):
-            sel.add(r.get("company_id"))
-    return sel
+    return out
 
 
-def save_selection(wave: int, selected: set, frame: pd.DataFrame) -> int:
-    """Überschreibt die Einträge dieser Welle, lässt andere Wellen unberührt."""
-    other = []
-    if SELECTION_FILE.exists():
-        for line in SELECTION_FILE.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if r.get("wave") != wave:
-                other.append(r)
+def load_reviews(wave: int) -> dict:
+    """company_id -> {decision, note_self, note_ki} für eine Welle."""
+    rev = {}
+    for r in _read_lines():
+        if r.get("wave") != wave:
+            continue
+        decision = r.get("decision")
+        if decision is None and r.get("selected"):       # Alt-Records ohne decision
+            decision = "lead"
+        rev[r.get("company_id")] = {
+            "decision": decision,
+            "note_self": r.get("note_self") or "",
+            "note_ki": r.get("note_ki") or "",
+        }
+    return rev
+
+
+def save_reviews(wave: int, reviews: dict, frame: pd.DataFrame) -> int:
+    """Überschreibt die Einträge dieser Welle, lässt andere Wellen unberührt.
+    Persistiert nur Firmen mit Entscheidung oder Notiz. Rückgabe: Anzahl Leads."""
+    other = [r for r in _read_lines() if r.get("wave") != wave]
     ts = datetime.now(timezone.utc).isoformat()
     by_id = frame.set_index("company_id")
     new = []
-    for cid in selected:
+    for cid, rv in reviews.items():
+        decision = rv.get("decision")
+        note_self = (rv.get("note_self") or "").strip()
+        note_ki = (rv.get("note_ki") or "").strip()
+        if not decision and not note_self and not note_ki:
+            continue                                      # nichts zu speichern
         name = by_id.loc[cid, "name"] if cid in by_id.index else ""
         new.append({"company_id": cid, "name": name, "wave": wave,
-                    "selected": True, "selected_at": ts})
+                    "decision": decision, "selected": decision == "lead",
+                    "note_self": note_self, "note_ki": note_ki, "decided_at": ts})
     SELECTION_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(SELECTION_FILE, "w", encoding="utf-8") as f:
         for r in other + new:
             f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
-    return len(new)
+    return sum(1 for r in new if r["selected"])
 
 
 # --------------------------------------------------------------------------- #
@@ -192,11 +212,11 @@ sb = st.sidebar
 sb.header("Welle")
 wave = sb.number_input("Welle-Nummer", min_value=1, max_value=99, value=1, step=1)
 
-# Auswahl-State je Welle in der Session halten (überlebt Reruns)
-state_key = f"selected_w{wave}"
-if state_key not in st.session_state:
-    st.session_state[state_key] = load_selection(int(wave))
-selected: set = st.session_state[state_key]
+# Review-State je Welle in der Session halten (überlebt Reruns)
+rev_key = f"reviews_w{wave}"
+if rev_key not in st.session_state:
+    st.session_state[rev_key] = load_reviews(int(wave))
+reviews: dict = st.session_state[rev_key]
 
 # --- Filterleiste über der Tabelle ---
 plz_opts = sorted(df["plz2"].dropna().unique().tolist())
@@ -259,66 +279,182 @@ if suche.strip():
 f = f.sort_values(["klasse", "score", "gf_alter"], ascending=[True, False, False])
 
 # --- Kennzahlen ---
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Treffer im Filter", len(f))
-c2.metric("davon markiert", int(f["company_id"].isin(selected).sum()))
-c3.metric("markiert gesamt (Welle)", len(selected))
-gespeichert = load_selection(int(wave))
-c4.metric("gespeichert", len(gespeichert),
-          delta=(len(selected) - len(gespeichert)) or None,
-          delta_color="off")
+leads = [cid for cid, r in reviews.items() if r.get("decision") == "lead"]
+unint = [cid for cid, r in reviews.items() if r.get("decision") == "uninteressant"]
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Treffer im Filter", len(f))
+m2.metric("Leads im Filter", int(f["company_id"].isin(leads).sum()))
+m3.metric("Leads gesamt (Welle)", len(leads))
+m4.metric("uninteressant (Welle)", len(unint))
 
-# --- Tabelle mit Auswahl-Checkbox ---
-view = f.copy()
-view.insert(0, "wählen", view["company_id"].isin(selected))
-cols = ["wählen", "name", "region", "ort", "branche_wz", "bwl_affinitaet", "cluster",
-        "klasse", "score", "gf_alter", "familie", "nachfolge_geregelt", "umsatz_teur",
-        "bilanz_teur", "mitarbeiter", "nachfolge_signale", "begruendung", "website"]
-edited = st.data_editor(
-    view[cols],
-    hide_index=True,
-    width="stretch",
-    height=560,
-    column_config={
-        "wählen": st.column_config.CheckboxColumn("wählen", help="für Ansprache markieren", width="small"),
-        "name": st.column_config.TextColumn("Firma", width="medium"),
-        "branche_wz": st.column_config.TextColumn("WZ", width="small"),
-        "bwl_affinitaet": st.column_config.TextColumn("BWL", width="small"),
-        "klasse": st.column_config.TextColumn("Kl.", width="small"),
-        "gf_alter": st.column_config.NumberColumn("GF-Alter", width="small"),
-        "familie": st.column_config.CheckboxColumn("Fam.", width="small"),
-        "nachfolge_geregelt": st.column_config.CheckboxColumn("Nf ger.", width="small",
-                                                              help="nächste Generation steht laut Website bereit"),
-        "nachfolge_signale": st.column_config.TextColumn("Nachfolge-Signale", width="large"),
-        "begruendung": st.column_config.TextColumn("Anruf-Briefing (Score)", width="large"),
-        "umsatz_teur": st.column_config.NumberColumn("Umsatz T€", format="localized", width="small"),
-        "bilanz_teur": st.column_config.NumberColumn("Bilanz T€", format="localized", width="small"),
-        "website": st.column_config.LinkColumn("Web", width="small"),
-    },
-    disabled=[c for c in cols if c != "wählen"],
-    key=f"editor_w{wave}",
-)
 
-# --- Markierungen aus den sichtbaren Zeilen ins globale Set mergen ---
-vis = view["company_id"].tolist()
-for cid, want in zip(vis, edited["wählen"].tolist()):
-    if want:
-        selected.add(cid)
+def _fmt_teur(v):
+    return f"{int(v):,}".replace(",", ".") if pd.notna(v) else "—"
+
+
+tab_tbl, tab_card = st.tabs(["Tabelle", "Karteikarte"])
+
+# ============================= TABELLE ============================= #
+with tab_tbl:
+    view = f.copy()
+    view.insert(0, "Lead", view["company_id"].isin(leads))
+    cols = ["Lead", "name", "region", "ort", "branche_wz", "bwl_affinitaet", "cluster",
+            "klasse", "score", "gf_alter", "familie", "nachfolge_geregelt", "umsatz_teur",
+            "bilanz_teur", "mitarbeiter", "nachfolge_signale", "website"]
+    edited = st.data_editor(
+        view[cols],
+        hide_index=True,
+        width="stretch",
+        height=560,
+        column_config={
+            "Lead": st.column_config.CheckboxColumn("Lead", help="als Lead markieren", width="small"),
+            "name": st.column_config.TextColumn("Firma", width="medium"),
+            "branche_wz": st.column_config.TextColumn("WZ", width="small"),
+            "bwl_affinitaet": st.column_config.TextColumn("BWL", width="small"),
+            "klasse": st.column_config.TextColumn("Kl.", width="small"),
+            "gf_alter": st.column_config.NumberColumn("GF-Alter", width="small"),
+            "familie": st.column_config.CheckboxColumn("Fam.", width="small"),
+            "nachfolge_geregelt": st.column_config.CheckboxColumn("Nf ger.", width="small",
+                                                                  help="nächste Generation steht laut Website bereit"),
+            "nachfolge_signale": st.column_config.TextColumn("Nachfolge-Signale", width="large"),
+            "umsatz_teur": st.column_config.NumberColumn("Umsatz T€", format="localized", width="small"),
+            "bilanz_teur": st.column_config.NumberColumn("Bilanz T€", format="localized", width="small"),
+            "website": st.column_config.LinkColumn("Web", width="small"),
+        },
+        disabled=[c for c in cols if c != "Lead"],
+        key=f"editor_w{wave}",
+    )
+    # Häkchen -> decision. Anhaken = Lead; Abhaken = zurück auf offen
+    # (überschreibt ein bewusstes "uninteressant" aus der Karteikarte nicht).
+    for cid, want in zip(view["company_id"].tolist(), edited["Lead"].tolist()):
+        cur = reviews.setdefault(cid, {"decision": None, "note_self": "", "note_ki": ""})
+        if want:
+            cur["decision"] = "lead"
+        elif cur.get("decision") == "lead":
+            cur["decision"] = None
+
+    b1, b2, _ = st.columns([1, 1, 4])
+    if b1.button("Speichern", type="primary", key="save_tbl"):
+        n = save_reviews(int(wave), reviews, df)
+        st.success(f"Welle {wave}: {n} Leads gespeichert nach selection.jsonl")
+        st.rerun()
+    if b2.button("Sichtbare als Lead", key="markall"):
+        for cid in view["company_id"].tolist():
+            reviews.setdefault(cid, {"note_self": "", "note_ki": ""})["decision"] = "lead"
+        save_reviews(int(wave), reviews, df)
+        st.rerun()
+
+# =========================== KARTEIKARTE =========================== #
+with tab_card:
+    ids = f["company_id"].tolist()
+    if not ids:
+        st.info("Kein Treffer im aktuellen Filter.")
     else:
-        selected.discard(cid)
+        pos = max(0, min(int(st.session_state.get("card_pos", 0)), len(ids) - 1))
+        cur_cid = ids[pos]
+        dkey, skey, kkey = f"dec_{wave}_{cur_cid}", f"self_{wave}_{cur_cid}", f"ki_{wave}_{cur_cid}"
 
-# --- Aktionen ---
-a1, a2, a3 = st.columns([1, 1, 4])
-if a1.button("Auswahl speichern", type="primary"):
-    n = save_selection(int(wave), selected, df)
-    st.success(f"{n} Firmen für Welle {wave} gespeichert nach selection.jsonl")
-    st.rerun()
-if a2.button("Sichtbare alle markieren"):
-    for cid in vis:
-        selected.add(cid)
-    st.rerun()
+        def _store_current():
+            reviews[cur_cid] = {
+                "decision": _DEC_TO_STORE.get(st.session_state.get(dkey, "—")),
+                "note_self": st.session_state.get(skey, ""),
+                "note_ki": st.session_state.get(kkey, ""),
+            }
+
+        # --- Navigation ---
+        n1, n2, n3 = st.columns([1, 4, 1])
+        if n1.button("◀ Zurück", width="stretch", disabled=pos == 0, key="prev"):
+            _store_current(); save_reviews(int(wave), reviews, df)
+            st.session_state["card_pos"] = pos - 1
+            st.rerun()
+        if n3.button("Weiter ▶", width="stretch", disabled=pos >= len(ids) - 1, key="next"):
+            _store_current(); save_reviews(int(wave), reviews, df)
+            st.session_state["card_pos"] = pos + 1
+            st.rerun()
+        badge = {"lead": "✅ Lead", "uninteressant": "🚫 uninteressant"}.get(
+            reviews.get(cur_cid, {}).get("decision"), "· offen")
+        n2.markdown(
+            f"<div style='text-align:center'>Firma <b>{pos+1}</b> von <b>{len(ids)}</b>"
+            f" &nbsp;·&nbsp; {badge}</div>", unsafe_allow_html=True)
+
+        row = f[f["company_id"] == cur_cid].iloc[0]
+
+        # --- Kopf ---
+        st.markdown(f"## {row['name']}")
+        st.caption(
+            f"Klasse **{row['klasse']}** (Score {row['score']})  |  "
+            f"{row['region']} · {row['ort']} · {row['plz']}  |  "
+            f"WZ {row['branche_wz']} · {row['cluster']} · BWL {row['bwl_affinitaet']}")
+
+        k = st.columns(4)
+        k[0].metric("GF-Alter", int(row["gf_alter"]) if pd.notna(row["gf_alter"]) else "—")
+        k[1].metric("Umsatz T€", _fmt_teur(row["umsatz_teur"]))
+        k[2].metric("Bilanz T€", _fmt_teur(row["bilanz_teur"]))
+        k[3].metric("Mitarbeiter", int(row["mitarbeiter"]) if pd.notna(row["mitarbeiter"]) else "—")
+
+        flags = []
+        if row["familie"]:
+            flags.append("Familienunternehmen")
+        if row["nachfolge_geregelt"]:
+            flags.append("⚠ Nachfolge intern geregelt")
+        if row["berater"]:
+            flags.append("Berater-Branche")
+        if flags:
+            st.markdown(" · ".join(flags))
+        if row["website"]:
+            st.markdown(f"🔗 [{row['website']}]({row['website']})")
+        if row["naechste_generation"]:
+            st.info(f"**Nächste Generation:** {row['naechste_generation']}")
+        if row["nachfolge_signale"]:
+            st.markdown(f"**Nachfolge-Signale:** {row['nachfolge_signale']}")
+
+        with st.expander("Anruf-Briefing (Score-Begründung)", expanded=True):
+            st.text(row["begruendung"] or "—")
+
+        st.divider()
+
+        # --- Entscheidung + Notizen (Widget-State je Firma initialisieren) ---
+        st.session_state.setdefault(dkey, _STORE_TO_DEC.get(reviews.get(cur_cid, {}).get("decision")))
+        st.session_state.setdefault(skey, reviews.get(cur_cid, {}).get("note_self", ""))
+        st.session_state.setdefault(kkey, reviews.get(cur_cid, {}).get("note_ki", ""))
+
+        st.radio("Entscheidung", DECISIONS, horizontal=True, key=dkey)
+        cc = st.columns(2)
+        cc[0].text_area("Mein Kommentar", key=skey, height=120,
+                        placeholder="Notiz für mich (Recherche, Timing, Kontakt …)")
+        cc[1].text_area("An die KI", key=kkey, height=120,
+                        placeholder="z. B. Fehlerkorrektur: GF-Alter falsch, falsches Signal, Dossier nachschärfen …")
+
+        _store_current()   # laufenden Stand in den Review-State spiegeln
+        if st.columns([1, 5])[0].button("Karte speichern", type="primary", key="save_card"):
+            save_reviews(int(wave), reviews, df)
+            st.toast("Gespeichert")
+
+        # Echte Pfeiltasten ←/→ (greift nicht, während in einem Textfeld getippt wird)
+        components.html(
+            """
+            <script>
+            const doc = window.parent.document;
+            if (!doc.__cardNavBound) {
+              doc.__cardNavBound = true;
+              doc.addEventListener('keydown', function(e){
+                const t = e.target;
+                if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
+                let label = null;
+                if (e.key === 'ArrowRight') label = 'Weiter';
+                else if (e.key === 'ArrowLeft') label = 'Zurück';
+                if (!label) return;
+                for (const b of doc.querySelectorAll('button')) {
+                  if (b.innerText && b.innerText.indexOf(label) !== -1 && !b.disabled) { b.click(); break; }
+                }
+              });
+            }
+            </script>
+            """,
+            height=0,
+        )
 
 st.caption(
-    f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true für die Welle.  "
+    f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true (decision==lead) je Welle.  "
     f"Default Welle 1: Köln-Bonn, BWL-fern/mittel, ohne Berater, GF-Alter ≥ 58."
 )
