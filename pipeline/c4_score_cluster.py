@@ -229,8 +229,7 @@ def build_begruendung(company, dossier: Dossier, sigs, res, cluster, ccfg) -> st
 
     alter = res["gf_alter"]
     L.append("Nachfolge: "
-             f"GF-Alter {alter if alter is not None else 'unbekannt'} "
-             f"({res['gf_alter_quelle']}), "
+             f"GF-Alter {alter if alter is not None else 'unbekannt'}, "
              f"GF-Name im Firmennamen: {'ja' if company.get('gf_name_in_firmenname') else 'nein'}, "
              f"Familienunternehmen: {'ja' if dossier.familienunternehmen.hinweis else 'nein'}, "
              f"Anzahl GF: {company.get('anzahl_gf')}")

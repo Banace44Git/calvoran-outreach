@@ -42,6 +42,10 @@ def _teur(v):
     except (TypeError, ValueError):
         return None
 
+
+def _tri(v):
+    return "ja" if v is True else "nein" if v is False else "unbekannt"
+
 # Köln-Bonn-Default-Region (PLZ-2-Steller); weitere Bereiche (Ruhrgebiet etc.)
 # tauchen automatisch in der Multiselect auf, sobald der Datenbestand wächst.
 REGION_LABELS = {
@@ -80,6 +84,7 @@ def load_frame() -> pd.DataFrame:
     cfg = config.load("bwl_affinitaet")
     aff = _affinitaet_lookup(cfg)
     blacklist = set(cfg.get("berater_blacklist") or [])
+    schmerz = config.load("clusters").get("schmerzpunkt") or {}
 
     client = get_client("calvoran")
     scores = {s["company_id"]: s for s in _fetch_all(
@@ -87,9 +92,13 @@ def load_frame() -> pd.DataFrame:
     comp = {c["id"]: c for c in _fetch_all(
         client, "companies",
         "id,name,plz,ort,branche_wz,gf_alter,umsatz_eur,bilanzsumme_eur,mitarbeiterzahl,website,"
-        "holding_flag,excluded,dup_of")}
+        "ek_quote_pct,gewinn_cagr_pct,anzahl_gf,gf_name_in_firmenname,holding_flag,excluded,dup_of")}
     dossiers = {d["company_id"]: (d.get("dossier") or {}) for d in _fetch_all(
         client, "dossiers", "company_id,dossier")}
+    # Belege je Firma (ein Zitat je Signal-Typ, wie c4)
+    sigs_by: dict = {}
+    for s in _fetch_all(client, "signals", "company_id,signal_type,beleg_zitat,beleg_url"):
+        sigs_by.setdefault(s["company_id"], []).append(s)
 
     rows = []
     for cid, s in scores.items():
@@ -104,6 +113,17 @@ def load_frame() -> pd.DataFrame:
         nachfolge = d.get("nachfolge_signale") or []
         fam = (d.get("familienunternehmen") or {}).get("hinweis")
         geregelt = bool(d.get("nachfolge_intern_geregelt"))
+        branche = s.get("cluster_branche") or "rest"
+        fstruct = d.get("fuehrungsstruktur") or {}
+        karriere = d.get("karriere") or {}
+        bel, seen_t = [], set()
+        for sg in sigs_by.get(cid, []):
+            stp = sg.get("signal_type") or "sonstiges"
+            if stp in seen_t:
+                continue
+            seen_t.add(stp)
+            bel.append({"type": stp, "zitat": (sg.get("beleg_zitat") or "").strip(),
+                        "url": sg.get("beleg_url") or ""})
         rows.append({
             "company_id": cid,
             "name": c.get("name") or "",
@@ -113,7 +133,7 @@ def load_frame() -> pd.DataFrame:
             "branche_wz": wz,
             "bwl_affinitaet": aff.get(wz2, "mittel"),
             "berater": wz2 in blacklist,
-            "cluster": s.get("cluster_branche") or "rest",
+            "cluster": branche,
             "klasse": s.get("score_klasse"),
             "score": s.get("score_total"),
             "gf_alter": c.get("gf_alter"),
@@ -126,6 +146,17 @@ def load_frame() -> pd.DataFrame:
             "bilanz_teur": _teur(c.get("bilanzsumme_eur")),
             "mitarbeiter": c.get("mitarbeiterzahl"),
             "website": c.get("website") or "",
+            "ek_quote": c.get("ek_quote_pct"),
+            "cagr": c.get("gewinn_cagr_pct"),
+            "anzahl_gf": c.get("anzahl_gf"),
+            "gf_name_in_name": bool(c.get("gf_name_in_firmenname")),
+            "schmerzpunkt": schmerz.get(branche, schmerz.get("rest", "")),
+            "geschaeftsmodell": d.get("geschaeftsmodell") or "",
+            "kaufm_besetzt": fstruct.get("kaufmaennische_funktion_besetzt"),
+            "zweite_ebene": fstruct.get("zweite_ebene_sichtbar"),
+            "kaufm_stellen": karriere.get("kaufm_stellen") or [],
+            "hooks": d.get("ansprache_hooks") or [],
+            "belege": bel,
         })
     return pd.DataFrame(rows)
 
@@ -387,29 +418,71 @@ with tab_card:
             f"{row['region']} · {row['ort']} · {row['plz']}  |  "
             f"WZ {row['branche_wz']} · {row['cluster']} · BWL {row['bwl_affinitaet']}")
 
-        k = st.columns(4)
-        k[0].metric("GF-Alter", int(row["gf_alter"]) if pd.notna(row["gf_alter"]) else "—")
-        k[1].metric("Umsatz T€", _fmt_teur(row["umsatz_teur"]))
-        k[2].metric("Bilanz T€", _fmt_teur(row["bilanz_teur"]))
-        k[3].metric("Mitarbeiter", int(row["mitarbeiter"]) if pd.notna(row["mitarbeiter"]) else "—")
+        if row["schmerzpunkt"]:
+            st.markdown(f"**Schmerzpunkt (Brief):** {row['schmerzpunkt']}")
 
-        flags = []
+        # Flags + Website (klickbar)
+        meta = []
         if row["familie"]:
-            flags.append("Familienunternehmen")
+            meta.append("Familienunternehmen")
         if row["nachfolge_geregelt"]:
-            flags.append("⚠ Nachfolge intern geregelt")
+            meta.append("⚠ Nachfolge intern geregelt")
         if row["berater"]:
-            flags.append("Berater-Branche")
-        if flags:
-            st.markdown(" · ".join(flags))
+            meta.append("Berater-Branche")
         if row["website"]:
-            st.markdown(f"🔗 [{row['website']}]({row['website']})")
+            meta.append(f"[🔗 Website]({row['website']})")
+        if meta:
+            st.markdown(" · ".join(meta))
         if row["naechste_generation"]:
             st.info(f"**Nächste Generation:** {row['naechste_generation']}")
+
+        # Kennzahlen + Nachfolge/Bedarf tabellarisch
+        def _pct(v):
+            return f"{v:.1f}".replace(".", ",") + " %" if pd.notna(v) else "—"
+
+        def _i(v):
+            return str(int(v)) if pd.notna(v) else "—"
+
+        def _teur_cell(v):
+            return f"{_fmt_teur(v)} T€" if pd.notna(v) else "—"
+
+        left, right = st.columns(2)
+        left.markdown(
+            "| Kennzahl | Wert |\n|:--|--:|\n"
+            f"| Umsatz | {_teur_cell(row['umsatz_teur'])} |\n"
+            f"| Bilanzsumme | {_teur_cell(row['bilanz_teur'])} |\n"
+            f"| EK-Quote | {_pct(row['ek_quote'])} |\n"
+            f"| Mitarbeiter | {_i(row['mitarbeiter'])} |\n"
+            f"| Gewinn-CAGR | {_pct(row['cagr'])} |"
+        )
+        offene = "; ".join(row["kaufm_stellen"]) if row["kaufm_stellen"] else "—"
+        right.markdown(
+            "| Nachfolge / Bedarf | |\n|:--|--:|\n"
+            f"| GF-Alter | {_i(row['gf_alter'])} |\n"
+            f"| GF-Name im Namen | {'ja' if row['gf_name_in_name'] else 'nein'} |\n"
+            f"| Anzahl GF | {_i(row['anzahl_gf'])} |\n"
+            f"| Kaufm. Funktion besetzt | {_tri(row['kaufm_besetzt'])} |\n"
+            f"| 2. Ebene sichtbar | {_tri(row['zweite_ebene'])} |\n"
+            f"| Offene kaufm. Stellen | {offene} |"
+        )
+
+        if row["geschaeftsmodell"]:
+            st.markdown(f"**Geschäftsmodell:** {row['geschaeftsmodell']}")
         if row["nachfolge_signale"]:
             st.markdown(f"**Nachfolge-Signale:** {row['nachfolge_signale']}")
 
-        with st.expander("Anruf-Briefing (Score-Begründung)", expanded=True):
+        if row["belege"]:
+            with st.expander(f"Belege ({len(row['belege'])})", expanded=False):
+                for b in row["belege"]:
+                    line = f"**{b['type']}** — „{b['zitat']}“"
+                    if b["url"]:
+                        line += f" — [Quelle]({b['url']})"
+                    st.markdown(line)
+        if row["hooks"]:
+            with st.expander(f"Ansprache-Hooks ({len(row['hooks'])})", expanded=False):
+                for h in row["hooks"]:
+                    st.markdown(f"- {h}")
+        with st.expander("Briefing-Rohtext (für Anruf)", expanded=False):
             st.text(row["begruendung"] or "—")
 
         st.divider()
