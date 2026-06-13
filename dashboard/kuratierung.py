@@ -225,7 +225,7 @@ plz_fmt = lambda p: f"{p} · {REGION_LABELS.get(p, '')}".strip(" ·")
 umax = int(df["umsatz_teur"].dropna().max()) if df["umsatz_teur"].notna().any() else 0
 bmax = int(df["bilanz_teur"].dropna().max()) if df["bilanz_teur"].notna().any() else 0
 
-with st.container(border=True):
+with st.expander("Filter / Suchkriterien", expanded=True):
     r1 = st.columns(4)
     klassen = r1[0].multiselect("Score-Klasse", ["A", "B", "C"], default=["A", "B"])
     bwl_sel = r1[1].multiselect("BWL-Affinität", ["fern", "mittel", "nah"], default=["fern", "mittel"],
@@ -380,7 +380,8 @@ with tab_card:
         row = f[f["company_id"] == cur_cid].iloc[0]
 
         # --- Kopf ---
-        st.markdown(f"## {row['name']}")
+        st.markdown(f"<div style='font-size:1.35rem;font-weight:700;margin:0.1rem 0'>{row['name']}</div>",
+                    unsafe_allow_html=True)
         st.caption(
             f"Klasse **{row['klasse']}** (Score {row['score']})  |  "
             f"{row['region']} · {row['ort']} · {row['plz']}  |  "
