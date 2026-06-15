@@ -13,8 +13,10 @@ Start:
 
 from __future__ import annotations
 
+import csv
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +35,16 @@ from calvoran.db import get_client  # noqa: E402
 
 OUTPUT_DIR = "/Users/johannesbreuers/projects/os/01-projects/fractional-cfo/outreach"
 SELECTION_FILE = Path(OUTPUT_DIR) / "selection.jsonl"
+# Einzelpersonen (GF + Prokuristen) aus der hr-engine-Anreicherung. Join über
+# norm(firma)+plz — derselbe Schlüssel, mit dem c1b_import_gf_alter die DB befüllt.
+HR_PERSONEN_CSV = Path("/Users/johannesbreuers/projects/os/01-projects/fractional-cfo/hr-abruf/gf-geburtsdaten.csv")
+# Roh-PDFs der hr-engine (Aktueller Ausdruck je job_key); Dateiname: "<job_key>+AD-<ts>.pdf".
+HR_RAW_DIR = Path.home() / ".local/state/hr-engine/raw"
+
+
+def _norm(s: str) -> str:
+    """Identisch zu pipeline/_common.norm — bewusst repliziert (1 Zeile, stabil)."""
+    return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
 
 def _teur(v):
@@ -80,6 +92,58 @@ def _fetch_all(client, tbl, cols):
     return out
 
 
+@st.cache_data(ttl=600)
+def load_ad_pdf_map() -> dict:
+    """key norm(firma)|plz -> Pfad zum jüngsten AD-PDF der hr-engine (oder fehlend).
+
+    Das raw-Verzeichnis wird einmal gescannt (job_key -> jüngstes PDF), dann über den
+    job_key der CSV auf den Firmen-Key gejoint. Timestamp steckt im Dateinamen
+    (YYYYmmddHHMMSS), also ist lexikografisch == chronologisch.
+    """
+    out: dict = {}
+    if not HR_PERSONEN_CSV.exists() or not HR_RAW_DIR.exists():
+        return out
+    pdf_by_job: dict = {}
+    for p in HR_RAW_DIR.glob("*+AD-*.pdf"):
+        jk = p.name.split("+AD-")[0]
+        prev = pdf_by_job.get(jk)
+        if prev is None or p.name > prev.name:
+            pdf_by_job[jk] = p
+    with open(HR_PERSONEN_CSV, encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            jk = (r.get("job_key") or "").strip()
+            key = f"{_norm(r.get('firma'))}|{(r.get('plz') or '').strip()}"
+            if jk in pdf_by_job and key not in out:
+                out[key] = str(pdf_by_job[jk])
+    return out
+
+
+@st.cache_data(ttl=600)
+def load_personen() -> dict:
+    """key norm(firma)|plz -> Liste Personen (GF + Prokuristen) aus der hr-engine-CSV.
+
+    Alter wird aus dem Geburtsjahr gegen das aktuelle Jahr gerechnet (nicht aus der
+    CSV-Spalte, die das Alter zum Abrufzeitpunkt einfror).
+    """
+    out: dict = {}
+    if not HR_PERSONEN_CSV.exists():
+        return out
+    now_year = datetime.now(timezone.utc).year
+    with open(HR_PERSONEN_CSV, encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            bj = (r.get("gf_geburtsdatum") or "").strip()[:4]
+            alter = now_year - int(bj) if bj.isdigit() else None
+            name = " ".join(p for p in ((r.get("gf_vorname") or "").strip(),
+                                        (r.get("gf_nachname") or "").strip()) if p)
+            key = f"{_norm(r.get('firma'))}|{(r.get('plz') or '').strip()}"
+            out.setdefault(key, []).append({
+                "name": name, "alter": alter,
+                "rolle": (r.get("rolle") or "").strip(),
+                "ist_gf": (r.get("ist_gf") or "").strip() == "1",
+            })
+    return out
+
+
 def _affinitaet_lookup(cfg: dict) -> dict:
     out = {}
     for stufe, codes in (cfg.get("affinitaet") or {}).items():
@@ -95,13 +159,16 @@ def load_frame() -> pd.DataFrame:
     blacklist = set(cfg.get("berater_blacklist") or [])
     schmerz = config.load("clusters").get("schmerzpunkt") or {}
 
+    personen = load_personen()
+    ad_pdf_map = load_ad_pdf_map()
     client = get_client("calvoran")
     scores = {s["company_id"]: s for s in _fetch_all(
         client, "scores", "company_id,score_klasse,score_total,cluster_branche,cluster_key,begruendung")}
     comp = {c["id"]: c for c in _fetch_all(
         client, "companies",
         "id,name,plz,ort,branche_wz,gf_alter,umsatz_eur,bilanzsumme_eur,mitarbeiterzahl,website,"
-        "ek_quote_pct,gewinn_cagr_pct,anzahl_gf,gf_name_in_firmenname,holding_flag,excluded,dup_of")}
+        "ek_quote_pct,gewinn_cagr_pct,anzahl_gf,gf_name_in_firmenname,holding_flag,excluded,dup_of,"
+        "register_id,hr_amtsgericht")}
     dossiers = {d["company_id"]: (d.get("dossier") or {}) for d in _fetch_all(
         client, "dossiers", "company_id,dossier")}
     # Belege je Firma (ein Zitat je Signal-Typ, wie c4)
@@ -136,6 +203,8 @@ def load_frame() -> pd.DataFrame:
         rows.append({
             "company_id": cid,
             "name": c.get("name") or "",
+            "register_id": c.get("register_id") or "",
+            "hr_amtsgericht": c.get("hr_amtsgericht") or "",
             "plz": plz, "plz2": plz2,
             "region": REGION_LABELS.get(plz2, plz2 or "?"),
             "ort": c.get("ort") or "",
@@ -159,6 +228,8 @@ def load_frame() -> pd.DataFrame:
             "cagr": c.get("gewinn_cagr_pct"),
             "anzahl_gf": c.get("anzahl_gf"),
             "gf_name_in_name": bool(c.get("gf_name_in_firmenname")),
+            "personen": personen.get(f"{_norm(c.get('name'))}|{plz}", []),
+            "ad_pdf": ad_pdf_map.get(f"{_norm(c.get('name'))}|{plz}"),
             "schmerzpunkt": schmerz.get(branche, schmerz.get("rest", "")),
             "geschaeftsmodell": d.get("geschaeftsmodell") or "",
             "kaufm_besetzt": fstruct.get("kaufmaennische_funktion_besetzt"),
@@ -421,8 +492,21 @@ with tab_card:
         row = f[f["company_id"] == cur_cid].iloc[0]
 
         # --- Kopf ---
-        st.markdown(f"<div style='font-size:1.35rem;font-weight:700;margin:0.1rem 0'>{row['name']}</div>",
-                    unsafe_allow_html=True)
+        reg = (row.get("register_id") or "").strip()
+        court = (row.get("hr_amtsgericht") or "").strip()
+        reg_label = (reg + (f" · AG {court}" if court else "")) if reg else ""
+        st.markdown(
+            f"<div style='font-size:1.35rem;font-weight:700;margin:0.1rem 0'>{row['name']}"
+            f"<span style='font-size:0.85rem;font-weight:400;color:#888;margin-left:0.6rem'>"
+            f"{reg_label}</span></div>",
+            unsafe_allow_html=True)
+        ad_pdf = row.get("ad_pdf")
+        if ad_pdf and Path(ad_pdf).exists():
+            with open(ad_pdf, "rb") as _fh:
+                st.download_button(
+                    f"📄 AD-Auszug öffnen{(' · ' + reg) if reg else ''}",
+                    data=_fh.read(), file_name=Path(ad_pdf).name,
+                    mime="application/pdf", key=f"adpdf_{cur_cid}")
         st.caption(
             f"Klasse **{row['klasse']}** (Score {row['score']})  |  "
             f"{row['region']} · {row['ort']} · {row['plz']}  |  "
@@ -448,12 +532,12 @@ with tab_card:
         if row["website"]:
             meta.append(f"[🔗 Website]({row['website']})")
         lines = []
-        if row["schmerzpunkt"]:
-            lines.append(f"**Schmerzpunkt (Brief):** {row['schmerzpunkt']}")
-        if meta:
-            lines.append(" · ".join(meta))
         if row["geschaeftsmodell"]:
             lines.append(f"**Geschäftsmodell:** {row['geschaeftsmodell']}")
+        if meta:
+            lines.append(" · ".join(meta))
+        if row["schmerzpunkt"]:
+            lines.append(f"**Schmerzpunkt (Brief):** {row['schmerzpunkt']}")
         if lines:
             st.markdown("<br>".join(lines), unsafe_allow_html=True)
         if row["naechste_generation"]:
@@ -471,15 +555,34 @@ with tab_card:
             ("Gewinn-CAGR", _pct(row["cagr"])),
         ]), unsafe_allow_html=True)
         cc.markdown(_kv_table([
-            ("GF-Alter", _i(row["gf_alter"])),
-            ("GF-Name", "ja" if row["gf_name_in_name"] else "nein"),
-            ("Anzahl GF", _i(row["anzahl_gf"])),
+            ("GF-Alter (ältester)", _i(row["gf_alter"])),
+            ("GF-Name in Firma", "ja" if row["gf_name_in_name"] else "nein"),
         ]), unsafe_allow_html=True)
         cd.markdown(_kv_table([
             ("Kaufm. Funktion besetzt", _tri(row["kaufm_besetzt"])),
             ("2. Ebene sichtbar", _tri(row["zweite_ebene"])),
             ("Offene kaufm. Stellen", offene),
         ]), unsafe_allow_html=True)
+
+        # Geschäftsführung + Prokura aus dem AD (Name + Alter je Person, ältester zuerst).
+        pers = row.get("personen") or []
+        if pers:
+            def _fmt_p(p):
+                a = f" ({p['alter']})" if p["alter"] is not None else ""
+                return f"{p['name']}{a}"
+
+            def _by_age_desc(ps):
+                return sorted(ps, key=lambda x: (x["alter"] is None, -(x["alter"] or 0)))
+
+            gfs = _by_age_desc([p for p in pers if p["ist_gf"]])
+            proks = _by_age_desc([p for p in pers if not p["ist_gf"]])
+            plines = []
+            if gfs:
+                plines.append("**Geschäftsführer:** " + " · ".join(_fmt_p(p) for p in gfs))
+            if proks:
+                plines.append("**Prokura:** " + " · ".join(_fmt_p(p) for p in proks))
+            if plines:
+                st.markdown("<br>".join(plines), unsafe_allow_html=True)
 
         if row["nachfolge_signale"]:
             st.markdown(f"**Nachfolge-Signale:** {row['nachfolge_signale']}")
