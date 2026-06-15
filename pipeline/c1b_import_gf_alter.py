@@ -1,8 +1,10 @@
 """Phase 1: GF-Geburtsjahr aus der hr-engine-Anreicherung -> calvoran.companies.
 
 Quelle: 01-projects/fractional-cfo/hr-abruf/gf-geburtsdaten.csv (Langform, eine Zeile
-je GF). Join über norm(firma)+plz. Pro Firma der ÄLTESTE GF (kleinstes Geburtsjahr) als
-Nachfolge-Indikator. Idempotent; partielle Abdeckung ist erwartet (hr-engine läuft noch).
+je Person). Join über norm(firma)+plz. Es zählen ausschließlich Personen mit ist_gf=1
+(Geschäftsführer) — Prokuristen/Liquidatoren bleiben außen vor. Pro Firma: der ÄLTESTE
+GF (kleinstes Geburtsjahr) als Nachfolge-Indikator und die GF-Anzahl laut AD (überschreibt
+den North-Data-Zählwert). Idempotent; partielle Abdeckung erwartet (hr-engine läuft noch).
 
     .venv/bin/python pipeline/c1b_import_gf_alter.py [--gf PATH]
 """
@@ -48,36 +50,48 @@ def main() -> None:
     now_year = datetime.now(timezone.utc).year
 
     gf_rows = list(csv.DictReader(open(args.gf, encoding="utf-8")))
-    # key -> (geburtsjahr, fetched_at) des ältesten GF
-    by_key: dict = {}
+    # Nur echte Geschäftsführer (ist_gf=1) zählen. Prokuristen, Liquidatoren etc. dürfen
+    # weder das GF-Alter noch die GF-Anzahl bestimmen — sonst kapert z.B. ein 82-jähriger
+    # Prokurist das Nachfolge-Signal einer Firma mit zwei GF Anfang 60.
+    by_key: dict = {}   # key -> (geburtsjahr, fetched_at) des ältesten GF
+    gf_count: dict = {}  # key -> Anzahl GF laut AD (belastbarer als North-Data-Zählwert)
     for r in gf_rows:
+        if (r.get("ist_gf") or "").strip() != "1":
+            continue
+        key = f"{norm(r.get('firma'))}|{(r.get('plz') or '').strip()}"
+        gf_count[key] = gf_count.get(key, 0) + 1
         jahr = year_of(r.get("gf_geburtsdatum"))
         if not jahr:
             continue
-        key = f"{norm(r.get('firma'))}|{(r.get('plz') or '').strip()}"
         prev = by_key.get(key)
         if prev is None or jahr < prev[0]:
             by_key[key] = (jahr, r.get("fetched_at", ""))
 
     companies = fetch_all(client, "id,name,plz")
-    matched = 0
+    matched = matched_count = 0
     for c in companies:
         key = f"{norm(c.get('name'))}|{(c.get('plz') or '').strip()}"
+        upd: dict = {}
         hit = by_key.get(key)
-        if not hit:
-            continue
-        jahr, fetched = hit
-        client.table("companies").update({
-            "gf_geburtsjahr": jahr,
-            "gf_alter": now_year - jahr,
-            "gf_quelle": f"hr-engine/AD/{(fetched or '')[:10]}",
-        }).eq("id", c["id"]).execute()
-        matched += 1
+        if hit:
+            jahr, fetched = hit
+            upd.update({
+                "gf_geburtsjahr": jahr,
+                "gf_alter": now_year - jahr,
+                "gf_quelle": f"hr-engine/AD/{(fetched or '')[:10]}",
+            })
+            matched += 1
+        n_gf = gf_count.get(key)
+        if n_gf:
+            upd["anzahl_gf"] = n_gf
+            matched_count += 1
+        if upd:
+            client.table("companies").update(upd).eq("id", c["id"]).execute()
 
     log.log("gf_alter_done", gf_zeilen=len(gf_rows), gf_firmen=len(by_key),
-            companies=len(companies), gematcht=matched)
-    print(f"GF-Alter: {matched} Firmen angereichert (von {len(by_key)} GF-Firmen, "
-          f"{len(companies)} companies gesamt).")
+            companies=len(companies), gematcht=matched, anzahl_gf_gesetzt=matched_count)
+    print(f"GF-Alter: {matched} Firmen angereichert (von {len(by_key)} GF-Firmen), "
+          f"Anzahl GF aus AD korrigiert: {matched_count} ({len(companies)} companies gesamt).")
 
 
 if __name__ == "__main__":
