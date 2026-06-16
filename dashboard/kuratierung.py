@@ -47,6 +47,20 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
 
+def _generationswechsel(personen: list) -> bool:
+    """Hartes 'Nachfolge geregelt'-Signal: zwei oder mehr Geschäftsführer teilen den
+    Nachnamen und mindestens einer davon ist jünger als 50 — praktisch immer ein bereits
+    vollzogener Generationswechsel (kein Verkaufsanlass). Strenger als das weiche
+    Dossier-Signal, weil rein aus den Register-Stammdaten ableitbar."""
+    by_sn: dict = {}
+    for p in personen or []:
+        if not p.get("ist_gf") or not p.get("name"):
+            continue
+        by_sn.setdefault(p["name"].split()[-1].lower(), []).append(p.get("alter"))
+    return any(len(ages) >= 2 and any(a is not None and a < 50 for a in ages)
+               for ages in by_sn.values())
+
+
 def _teur(v):
     """EUR -> Tausend-EUR, ganzzahlig; None/leer bleibt None."""
     try:
@@ -229,6 +243,7 @@ def load_frame() -> pd.DataFrame:
             "anzahl_gf": c.get("anzahl_gf"),
             "gf_name_in_name": bool(c.get("gf_name_in_firmenname")),
             "personen": personen.get(f"{_norm(c.get('name'))}|{plz}", []),
+            "generationswechsel": _generationswechsel(personen.get(f"{_norm(c.get('name'))}|{plz}", [])),
             "ad_pdf": ad_pdf_map.get(f"{_norm(c.get('name'))}|{plz}"),
             "schmerzpunkt": schmerz.get(branche, schmerz.get("rest", "")),
             "geschaeftsmodell": d.get("geschaeftsmodell") or "",
@@ -353,7 +368,8 @@ with st.expander("Filter / Suchkriterien", expanded=True):
         ohne_berater = st.checkbox("Berater-Branchen ausschließen", value=True,
                                    help="WZ 69/70/73/74/78 — Berater lassen ungern andere Berater ins Haus.")
         nf_geregelt_aus = st.checkbox("Nachfolge geregelt ausblenden", value=True,
-                                      help="Firmen, bei denen die nächste Generation laut Website bereitsteht (kein Verkaufsanlass).")
+                                      help="Hart: zwei GF gleichen Nachnamens, einer <50 (Generationswechsel vollzogen). "
+                                           "Weich: nächste Generation steht laut Website bereit. Beides = kein Verkaufsanlass.")
         alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", value=False)
         groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", value=True)
 
@@ -368,7 +384,7 @@ f = f[f["cluster"].isin(cluster_sel)]
 if ohne_berater:
     f = f[~f["berater"]]
 if nf_geregelt_aus:
-    f = f[~f["nachfolge_geregelt"]]
+    f = f[~(f["nachfolge_geregelt"] | f["generationswechsel"])]
 alter_ok = f["gf_alter"].fillna(-1) >= alter_min
 if alter_unbekannt:
     alter_ok = alter_ok | f["gf_alter"].isna()
@@ -583,6 +599,11 @@ with tab_card:
                 plines.append("**Prokura:** " + " · ".join(_fmt_p(p) for p in proks))
             if plines:
                 st.markdown("<br>".join(plines), unsafe_allow_html=True)
+            # Hartes Nachfolge-Signal direkt neben der GF-Angabe.
+            mark = ("<span style='color:#c00;font-weight:700'>ja</span>"
+                    if row.get("generationswechsel")
+                    else "<span style='color:#000'>—</span>")
+            st.markdown(f"**Generationswechsel vollzogen?** {mark}", unsafe_allow_html=True)
 
         if row["nachfolge_signale"]:
             st.markdown(f"**Nachfolge-Signale:** {row['nachfolge_signale']}")
