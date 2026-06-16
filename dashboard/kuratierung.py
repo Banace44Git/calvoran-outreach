@@ -367,9 +367,11 @@ with st.expander("Filter / Suchkriterien", expanded=True):
     with r2[3]:
         ohne_berater = st.checkbox("Berater-Branchen ausschließen", value=True,
                                    help="WZ 69/70/73/74/78 — Berater lassen ungern andere Berater ins Haus.")
-        nf_geregelt_aus = st.checkbox("Nachfolge geregelt ausblenden", value=True,
-                                      help="Hart: zwei GF gleichen Nachnamens, einer <50 (Generationswechsel vollzogen). "
-                                           "Weich: nächste Generation steht laut Website bereit. Beides = kein Verkaufsanlass.")
+        nf_geregelt_zeigen = st.checkbox("auch geregelte Nachfolge anzeigen", value=False,
+                                         help="Standard: vollzogener/geregelter Generationswechsel ist K.o. "
+                                              "(kein Verkaufsanlass) und ausgeblendet. Anhaken blendet diese Firmen "
+                                              "— jetzt Klasse KO — wieder ein. Hart: zwei GF gleichen Nachnamens, "
+                                              "einer <50. Weich: nächste Generation steht laut Website bereit.")
         alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", value=False)
         groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", value=True)
 
@@ -378,13 +380,17 @@ with st.expander("Filter / Suchkriterien", expanded=True):
 # --- Filter anwenden ---
 f = df.copy()
 f = f[f["plz2"].isin(plz_sel)]
-f = f[f["klasse"].isin(klassen)]
 f = f[f["bwl_affinitaet"].isin(bwl_sel)]
 f = f[f["cluster"].isin(cluster_sel)]
 if ohne_berater:
     f = f[~f["berater"]]
-if nf_geregelt_aus:
-    f = f[~(f["nachfolge_geregelt"] | f["generationswechsel"])]
+# Score-Klasse + geregelte Nachfolge: geregelte sind seit c4 K.o. (Klasse KO). Default
+# blendet sie aus; der Toggle blendet sie zusätzlich zur Klassen-Auswahl wieder ein.
+geregelt = f["nachfolge_geregelt"] | f["generationswechsel"]
+if nf_geregelt_zeigen:
+    f = f[f["klasse"].isin(klassen) | geregelt]
+else:
+    f = f[f["klasse"].isin(klassen) & ~geregelt]
 alter_ok = f["gf_alter"].fillna(-1) >= alter_min
 if alter_unbekannt:
     alter_ok = alter_ok | f["gf_alter"].isna()

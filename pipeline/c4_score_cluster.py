@@ -27,7 +27,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from _common import OUTPUT_DIR, wz2
+from _common import OUTPUT_DIR, norm, wz2
 
 from calvoran import config
 from calvoran.db import get_client
@@ -70,10 +70,53 @@ def gf_alter_at(company, scored_year):
     return None, "unbekannt"
 
 
+# hr-engine-Anreicherung, eine Zeile je Person (Nachname + Geburtsjahr + ist_gf).
+# Personen-Ebene liegt NICHT in companies (nur die Aggregate gf_alter/anzahl_gf), und
+# der Supabase-Client kann kein DDL — deshalb wird das vollzogene-Generationswechsel-
+# Signal hier aus der CSV gerechnet, identisch zur Dashboard-Logik (kuratierung.py).
+GF_PERSONEN_CSV = Path(
+    "/Users/johannesbreuers/projects/os/01-projects/fractional-cfo/hr-abruf/gf-geburtsdaten.csv")
+
+
+def load_gf_personen(path: Path = GF_PERSONEN_CSV) -> dict:
+    """key = norm(firma)|plz -> Liste {nachname, geburtsjahr, ist_gf}."""
+    import csv
+    out: dict = {}
+    if not path.exists():
+        return out
+    with open(path, encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            nachname = (r.get("gf_nachname") or "").strip()
+            bj = (r.get("gf_geburtsdatum") or "").strip()[:4]
+            key = f"{norm(r.get('firma'))}|{(r.get('plz') or '').strip()}"
+            out.setdefault(key, []).append({
+                "nachname": nachname,
+                "geburtsjahr": int(bj) if bj.isdigit() else None,
+                "ist_gf": (r.get("ist_gf") or "").strip() == "1",
+            })
+    return out
+
+
+def generationswechsel_vollzogen(personen: list, ref_year: int) -> bool:
+    """Hartes Negativsignal: >=2 GF teilen den Nachnamen und mindestens einer ist jünger
+    als 50 -> praktisch immer ein bereits vollzogener Generationswechsel, kein Verkaufs-
+    anlass. Strenger als das weiche Dossier-Signal nachfolge_intern_geregelt, weil rein
+    aus den Register-Stammdaten ableitbar. K.o.-Kriterium (s. score_company)."""
+    by_sn: dict = {}
+    for p in personen or []:
+        if not p.get("ist_gf") or not p.get("nachname"):
+            continue
+        gj = p.get("geburtsjahr")
+        by_sn.setdefault(p["nachname"].lower(), []).append(
+            ref_year - gj if gj else None)
+    return any(len(ages) >= 2 and any(a is not None and a < 50 for a in ages)
+               for ages in by_sn.values())
+
+
 # --------------------------------------------------------------------------- #
 # Scoring (rein deterministisch; Source-of-Truth-Felder s. Modul-Docstring)
 # --------------------------------------------------------------------------- #
-def score_company(company, dossier: Dossier, scfg, scored_year) -> dict:
+def score_company(company, dossier: Dossier, scfg, scored_year, gen_vollzogen=False) -> dict:
     a = scfg["anker"]
     nf = scfg["nachfolge"]
     wb = scfg["web_bedarf"]
@@ -151,9 +194,13 @@ def score_company(company, dossier: Dossier, scfg, scored_year) -> dict:
         "holding_flag": {"hit": holding, "ko": True, "punkte": 0},
         "konzerntochter": {"hit": konzern, "ko": True, "punkte": 0},
         "insolvenz": {"hit": insol, "ko": True, "punkte": 0},
+        # Vollzogener Generationswechsel (>=2 GF gleichen Nachnamens, einer <50): kein
+        # Verkaufsanlass, strukturell wie Holding/Konzerntochter. Datensatz bleibt (KO-Klasse),
+        # im Dashboard per Toggle einblendbar.
+        "generationswechsel_vollzogen": {"hit": gen_vollzogen, "ko": True, "punkte": 0},
         "reiner_onlineshop": _entry(ab["reiner_onlineshop"]["punkte"], shop),
     }
-    ko = holding or konzern or insol
+    ko = holding or konzern or insol or gen_vollzogen
 
     breakdown = {"anker": anker, "nachfolge": nachfolge,
                  "web_bedarf": web_bedarf, "abzuege": abzuege}
@@ -412,7 +459,8 @@ def write_report(audit, args, version, determ) -> Path:
              "gf_alter_min", "gf_name_in_firmenname", "familienhinweis", "nur_ein_gf",
              "nachfolge_intern_geregelt",
              "keine_kaufm_funktion", "offene_kaufm_stelle", "zweite_ebene_unsichtbar",
-             "holding_flag", "konzerntochter", "insolvenz", "reiner_onlineshop"]
+             "holding_flag", "konzerntochter", "insolvenz",
+             "generationswechsel_vollzogen", "reiner_onlineshop"]
     for c in order:
         L.append(f"| {c} | {crit_hits.get(c, 0)} | {pct(crit_hits.get(c, 0), nk)} |")
     L.append("")
@@ -511,6 +559,7 @@ def run(args):
 
     companies = load_companies(client, cand_ids)
     sigs_by = load_signals(client, cand_ids)
+    gf_personen = load_gf_personen()  # Personen-Ebene für vollzogenen Generationswechsel
 
     audit, determ_ok, determ_tot = [], 0, 0
     for idx, cid in enumerate(cand_ids):
@@ -521,9 +570,11 @@ def run(args):
             audit.append(rec)
             continue
         rec["name"] = company.get("name")
+        gen_key = f"{norm(company.get('name'))}|{(company.get('plz') or '').strip()}"
+        gen_vollzogen = generationswechsel_vollzogen(gf_personen.get(gen_key, []), scored_year)
         try:
             dossier = Dossier.model_validate(dossiers[cid])
-            res = score_company(company, dossier, scfg, scored_year)
+            res = score_company(company, dossier, scfg, scored_year, gen_vollzogen)
             cluster = cluster_for(company, ccfg)
             begruendung = build_begruendung(company, dossier, sigs_by.get(cid, []), res, cluster, ccfg)
         except Exception as e:
@@ -533,7 +584,7 @@ def run(args):
             continue
 
         # Determinismus-Selbstcheck: zweite Berechnung muss identisch sein.
-        res2 = score_company(company, dossier, scfg, scored_year)
+        res2 = score_company(company, dossier, scfg, scored_year, gen_vollzogen)
         determ_tot += 1
         if (res2["total"], res2["klasse"], res2["breakdown"]) == (res["total"], res["klasse"], res["breakdown"]):
             determ_ok += 1
