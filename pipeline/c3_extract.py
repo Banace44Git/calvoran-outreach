@@ -64,7 +64,7 @@ def existing_dossier_ids(client) -> set:
 
 
 COLS = ("id,name,website,domain,prioritaets_score,bilanzsumme_eur,"
-        "plz,ort,branche_wz,ges_vertreter")
+        "plz,ort,branche_wz,ges_vertreter,raw")
 
 
 def _sort_prio(rows):
@@ -329,8 +329,10 @@ def run(args):
 
         task = task_for(company.get("prioritaets_score"), args.task)
         backend = args.backend or ("sonnet" if sample_every and idx % sample_every == 0 else None)
-        # build_user_text erwartet ges_vertreter_1 (Register-GF)
-        comp = {**company, "ges_vertreter_1": company.get("ges_vertreter") or ""}
+        # build_user_text erwartet ges_vertreter_1 (Register-GF) + gegenstand
+        # (Handelsregister-Unternehmensgegenstand aus dem North-Data-Rohsatz).
+        comp = {**company, "ges_vertreter_1": company.get("ges_vertreter") or "",
+                "gegenstand": (company.get("raw") or {}).get("Gegenstand")}
         try:
             dossier, meta = extractor.extract_dossier(
                 router, comp, pages, crawl_cfg, task=task, backend=backend, logger=log)

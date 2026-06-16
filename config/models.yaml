@@ -34,9 +34,11 @@ tasks:
     primary: gemma_local
     escalate: haiku
   dossier_score_2_3:            # Welle 1 (1.851, Score 2/3)
-    primary: haiku
-    sample_to: sonnet
-    sample_pct: 5
+    primary: gemma_local        # 2026-06-16: von haiku auf lokales Gemma (Kosten; Jo
+                                # braucht wenig ausformulierten KI-Text). gemma4:26b.
+    escalate: haiku             # nur bei wiederholtem Parse-Fehler (selten), sonst rein lokal
+    # sample_to: sonnet / sample_pct: 5  -> deaktiviert (paid). Bei Bedarf via
+    # CLI --sonnet-sample-pct reaktivierbar.
   ansprache_saetze:
     primary: sonnet
   hermes_summary:
