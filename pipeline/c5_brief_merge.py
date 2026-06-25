@@ -59,6 +59,12 @@ A_BULLET2 = "Vertriebscontrolling sowie Auftragscontrolling und -kalkulation"
 GF_OVERRIDE = {  # name-substring -> (vorname, nachname, gender) — übersteuert HR-Daten
     "JTILS": ("Mathew", "Jacob", "m"),       # Register: Mathew; Jo adressiert "Herr Jacob" (m.jacob@)
     "Günter Wendt": ("Frank", "Wendt", "m"),  # ältester (Therese 86) = Platzhalterdatum/Seniorin; Jo -> Frank (59)
+    # GF ohne Geburtsdatum im AD (Alt-Eintrag): nicht in gf-geburtsdaten.csv erfasst,
+    # einziger datierter Eintrag war ein Prokurist (jetzt korrekt ist_gf=0). GF-Name direkt
+    # aus dem AD ("Geschäftsführer: <Nachname>, <Vorname>, ...").
+    "Iser GmbH": ("Joachim", "Iser", "m"),
+    "Schilles": ("Peter", "Schilles", "m"),       # H + P Schilles Tiefbau-GmbH
+    "Heerdt": ("Hans-Peter", "Heerdt", "m"),       # Raumausstattung Heerdt GmbH
 }
 GENDER_OVERRIDE = {  # name-substring -> 'm'/'f', wenn gender-guesser unschlüssig (Jo bestätigt)
     "MFT Membran-Filtrations": "f",      # Hongmei Yan
