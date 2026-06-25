@@ -29,6 +29,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 import anthropic
 import docx
@@ -38,6 +39,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from calvoran.db import get_client  # noqa: E402
 
 MODEL = "claude-sonnet-4-6"  # == config/models.yaml tasks.ansprache_saetze.primary
+HR_GF_DEFAULT = ("/Users/johannesbreuers/projects/os/01-projects/fractional-cfo/"
+                 "hr-abruf/gf-geburtsdaten.csv")
+ALT_FLAG = 75   # GF ab diesem Alter zur bewussten Bestätigung markieren
 
 # Anker in der Vorlage (Platzhalter bzw. JTILS-Beispieltext)
 A_ANREDE_BLOCK = "Herrn/Frau"
@@ -52,8 +56,12 @@ A_BULLET1 = "der Optimierung des Warenlagers"
 A_BULLET2 = "Vertriebscontrolling sowie Auftragscontrolling und -kalkulation"
 
 # GF-Sonderfälle, die aus dem Rohnamen nicht eindeutig parsebar sind
-GF_OVERRIDE = {  # name-substring -> (vorname, nachname, male)
-    "JTILS": ("Mathew", "Jacob", True),
+GF_OVERRIDE = {  # name-substring -> (vorname, nachname, gender) — übersteuert HR-Daten
+    "JTILS": ("Mathew", "Jacob", "m"),       # Register: Mathew; Jo adressiert "Herr Jacob" (m.jacob@)
+    "Günter Wendt": ("Frank", "Wendt", "m"),  # ältester (Therese 86) = Platzhalterdatum/Seniorin; Jo -> Frank (59)
+}
+GENDER_OVERRIDE = {  # name-substring -> 'm'/'f', wenn gender-guesser unschlüssig (Jo bestätigt)
+    "MFT Membran-Filtrations": "f",      # Hongmei Yan
 }
 
 SYS = ("Du textest Brief-Bausteine für Johannes Breuers, externer CFO (Verkaufsvorbereitung im Mittelstand). "
@@ -77,35 +85,73 @@ def gen_prompt(name: str, wz: str, geschaeftsmodell: str) -> str:
 
 
 _GENDER = gg.Detector(case_sensitive=False)
+_TITLES = ["Prof.", "Dr.", "Dipl.-Ing.", "Dipl.", "Ing."]
 
 
-def parse_gf(name: str, ges_vertreter, anzahl_gf):
-    """Liefert (adresszeile1, name_zeile, salut, flags) für den ersten GF."""
-    flags = []
-    for key, (vor, nach, male) in GF_OVERRIDE.items():
+def _norm(s):
+    s = unicodedata.normalize("NFKD", (s or "").lower()).encode("ascii", "ignore").decode()
+    for t in [" gmbh", " mbh", " kg", " co", " ohg", " ag", "."]:
+        s = s.replace(t, " ")
+    return " ".join(s.split())
+
+
+def _split_title(vor, nach):
+    title = " ".join(t for t in _TITLES if t in f"{vor} {nach}")
+    for t in _TITLES:
+        vor, nach = vor.replace(t, ""), nach.replace(t, "")
+    return " ".join(vor.split()), " ".join(nach.split()), title.strip()
+
+
+def load_oldest_gf(hr_path):
+    """norm(firma) -> (alter, vorname, nachname, title) des ältesten aktiven GF."""
+    groups = {}
+    with open(hr_path, newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if r.get("ist_gf") != "1":
+                continue
+            try:
+                alter = int(r["gf_alter"])
+            except (ValueError, TypeError):
+                continue
+            groups.setdefault(_norm(r["firma"]), []).append(
+                (alter, r["gf_vorname"].strip(), r["gf_nachname"].strip()))
+    out = {}
+    for k, lst in groups.items():
+        alter, vor, nach = max(lst, key=lambda x: x[0])
+        vor, nach, title = _split_title(vor, nach)
+        out[k] = (alter, vor, nach, title)
+    return out
+
+
+def _gender(name, vorname):
+    for key, gd in GENDER_OVERRIDE.items():
         if key in name:
-            adr = "Herrn" if male else "Frau"
-            return adr, f"{vor} {nach}", f"Sehr geehrte{'r' if male else ''} {'Herr' if male else 'Frau'} {nach},", flags
-    raw = ges_vertreter[0] if isinstance(ges_vertreter, list) and ges_vertreter else (ges_vertreter or "")
-    if "," in raw:
-        nach, vor = (x.strip() for x in raw.split(",", 1))
-    else:
-        parts = raw.split()
-        nach, vor = (parts[-1] if parts else ""), " ".join(parts[:-1])
-    vorname1 = vor.split()[0] if vor else ""
-    g = _GENDER.get_gender(vorname1.split("-")[0])  # Bindestrich-Namen: erster Teil
-    if g in ("male", "mostly_male"):
-        male = True
-    elif g in ("female", "mostly_female"):
-        male = False
-    else:
-        male = True  # Default männlich, aber markieren
-        flags.append(f"Geschlecht unklar (Vorname '{vorname1}')")
-    if (anzahl_gf or 0) > 1:
-        flags.append(f"Mehrfach-GF ({anzahl_gf}) — adressiert: {vor} {nach}")
-    adr = "Herrn" if male else "Frau"
-    salut = f"Sehr geehrte{'r' if male else ''} {'Herr' if male else 'Frau'} {nach},"
-    return adr, f"{vor} {nach}".strip(), salut, flags
+            return gd
+    g = _GENDER.get_gender(vorname.split()[0].split("-")[0]) if vorname else "unknown"
+    return "m" if g in ("male", "mostly_male") else ("f" if g in ("female", "mostly_female") else "?")
+
+
+def parse_gf(name, oldest_map):
+    """Anrede für genau einen GF — den ältesten. -> (adr1, name_zeile, salut, flags)."""
+    flags = []
+    for key, (vor, nach, gd) in GF_OVERRIDE.items():
+        if key in name:
+            adr = "Herrn" if gd == "m" else "Frau"
+            return adr, f"{vor} {nach}", f"Sehr geehrte{'r' if gd=='m' else ''} {'Herr' if gd=='m' else 'Frau'} {nach},", flags
+    rec = oldest_map.get(_norm(name))
+    if not rec:
+        return None, "", "Sehr geehrte Damen und Herren,", ["KEINE GF-Altersdaten — generische Anrede"]
+    alter, vor, nach, title = rec
+    gd = _gender(name, vor)
+    if gd == "?":
+        gd = "m"
+        flags.append(f"Geschlecht unklar (Vorname '{vor}')")
+    if alter >= ALT_FLAG:
+        flags.append(f"ältester GF {alter} J. — bewusst ansprechen?")
+    adr = "Herrn" if gd == "m" else "Frau"
+    tpref = f"{title} " if title else ""
+    salut = f"Sehr geehrte{'r' if gd=='m' else ''} {'Herr' if gd=='m' else 'Frau'} {tpref}{nach},"
+    return adr, f"{tpref}{vor} {nach}".strip(), salut, flags
 
 
 def generate(client, name, wz, gm):
@@ -158,9 +204,11 @@ def main():
     ap.add_argument("--template", required=True, help="Word-Vorlage (JTILS-v3.docx)")
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--reuse", help="merge-data.json mit abgenommenen Sätzen (key=name-substring)")
+    ap.add_argument("--gf-data", default=HR_GF_DEFAULT, help="hr-abruf GF-Geburtsdaten CSV (ältester GF)")
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
     rest = hook_rest(args.template)
+    oldest_gf = load_oldest_gf(args.gf_data)
 
     # Auswahl laden
     names, wz_csv = [], {}
@@ -201,7 +249,7 @@ def main():
         else:
             hook, b1, b2 = generate(client, name, c.get("branche_wz") or wz_csv.get(name, ""),
                                     dd.get("geschaeftsmodell") or ""); src = "sonnet"
-        adr1, name_zeile, salut, flags = parse_gf(name, c.get("ges_vertreter"), c.get("anzahl_gf"))
+        adr1, name_zeile, salut, flags = parse_gf(name, oldest_gf)
         merge(args.template, os.path.join(args.outdir, f"{slug(name)}.docx"),
               adr1=adr1, name_zeile=name_zeile, firma=name, strasse=c.get("strasse") or "",
               plz_ort=f"{c.get('plz') or ''} {c.get('ort') or ''}".strip(), salut=salut,
