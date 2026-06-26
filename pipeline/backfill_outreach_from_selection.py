@@ -97,6 +97,18 @@ def main() -> None:
     cl = get_client()
     if args.source == "merge-data":
         by_wave = leads_from_merge_data(cl, args.merge_data, args.wave)
+        # Nur erzeugte Briefe nehmen, die in selection.jsonl AUCH Lead sind. Ein Brief kann
+        # für einen seither deselektierten Lead existieren (z.B. Biermann Verlag) — der soll
+        # nicht ins Versand-Tracking. selection.jsonl ist die Lead-Wahrheit.
+        lead_ids = {cid for ids in leads_from_selection(args.selection, None).values()
+                    for cid in ids}
+        for w in list(by_wave):
+            keep = [cid for cid in by_wave[w] if cid in lead_ids]
+            dropped = len(by_wave[w]) - len(keep)
+            if dropped:
+                print(f"  ⚠ Welle {w}: {dropped} erzeugte Briefe sind in selection.jsonl "
+                      "kein Lead → übersprungen.")
+            by_wave[w] = keep
     else:
         by_wave = leads_from_selection(args.selection, args.wave)
 
