@@ -184,6 +184,28 @@ create index if not exists hermes_log_job_idx on calvoran.hermes_log (job, run_a
 -- hermes_log) wird in Phase 6 angelegt, sobald Hermes tatsächlich auf Supabase zugreift.
 -- Bis dahin läuft kein Hermes-DB-Zugriff; service_role bleibt der Pipeline vorbehalten.
 
+-- ================= 0006_outreach_calls.sql =================
+-- CRM-Nachverfolgung Stufe 1: Anruf-Log (n Versuche/Firma + Wiedervorlage) und
+-- Idempotenz-Guard fürs Brief-Versand-Tracking auf outreach(company_id, channel, wave).
+
+create table if not exists calvoran.outreach_calls (
+    id            uuid primary key default gen_random_uuid(),
+    company_id    uuid not null references calvoran.companies(id) on delete cascade,
+    outreach_id   uuid references calvoran.outreach(id) on delete set null,
+    called_at     timestamptz not null default now(),
+    outcome       text not null
+                  check (outcome in ('nicht_erreicht','gesprochen','rueckruf_vereinbart',
+                                     'termin','kein_interesse','nicht_zustaendig','falsche_nummer')),
+    follow_up_at  timestamptz,
+    notes         text,
+    created_at    timestamptz not null default now()
+);
+create index if not exists outreach_calls_company_idx on calvoran.outreach_calls (company_id);
+create index if not exists outreach_calls_followup_idx on calvoran.outreach_calls (follow_up_at)
+    where follow_up_at is not null;
+create unique index if not exists outreach_company_channel_wave_uidx
+    on calvoran.outreach (company_id, channel, wave);
+
 -- ================= Grants fuer neue Tabellen (PostgREST/service_role) =================
 grant all on all tables in schema calvoran to anon, authenticated, service_role;
 grant all on all sequences in schema calvoran to anon, authenticated, service_role;

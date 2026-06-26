@@ -204,6 +204,23 @@ def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40]
 
 
+def record_outreach(cl, company_ids, wave):
+    """Idempotent je Brief eine outreach-Zeile (channel='letter', status='queued') anlegen.
+    Fetch-existing-then-insert (keine Dubletten, läuft auch ohne Unique-Index aus 0006).
+    Rückgabe: Anzahl neu angelegter Zeilen."""
+    seen = set()
+    for i in range(0, len(company_ids), 50):
+        rows = (cl.table("outreach").select("company_id")
+                .eq("channel", "letter").eq("wave", wave)
+                .in_("company_id", company_ids[i:i + 50]).execute().data)
+        seen.update(r["company_id"] for r in rows)
+    new = [{"company_id": cid, "channel": "letter", "status": "queued", "wave": wave}
+           for cid in company_ids if cid not in seen]
+    for i in range(0, len(new), 50):
+        cl.table("outreach").insert(new[i:i + 50]).execute()
+    return len(new)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selection", required=True, help="CSV mit Spalte 'name'")
@@ -211,6 +228,8 @@ def main():
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--reuse", help="merge-data.json mit abgenommenen Sätzen (key=name-substring)")
     ap.add_argument("--gf-data", default=HR_GF_DEFAULT, help="hr-abruf GF-Geburtsdaten CSV (ältester GF)")
+    ap.add_argument("--wave", type=int, help="Versandwelle: legt je Brief eine outreach-Zeile "
+                                             "(status='queued') für die CRM-Nachverfolgung an")
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
     rest = hook_rest(args.template)
@@ -242,7 +261,7 @@ def main():
             doss[d["company_id"]] = d["dossier"] or {}
 
     client = anthropic.Anthropic()
-    merge_data, review = {}, []
+    merge_data, review, merged_ids = {}, [], []
     for name in names:
         c = comp.get(name)
         if not c:
@@ -261,6 +280,7 @@ def main():
               plz_ort=f"{c.get('plz') or ''} {c.get('ort') or ''}".strip(), salut=salut,
               hook=hook, rest=rest, b1=b1, b2=b2)
         merge_data[name] = {"hook": hook, "b1": b1, "b2": b2}
+        merged_ids.append(c["id"])
         review.append({"name": name, "anrede": salut, "src": src, "hook": hook, "b1": b1, "b2": b2, "flags": flags})
 
     json.dump(merge_data, open(os.path.join(args.outdir, "_merge-data.json"), "w"), ensure_ascii=False, indent=2)
@@ -268,6 +288,11 @@ def main():
     n_ok = sum(1 for r in review if "hook" in r)
     n_flag = sum(1 for r in review if r.get("flags"))
     print(f"{n_ok}/{len(names)} Briefe erzeugt -> {args.outdir} | {n_flag} mit Flags (siehe _review.md)")
+
+    if args.wave is not None and merged_ids:
+        n_new = record_outreach(cl, merged_ids, args.wave)
+        print(f"outreach (Welle {args.wave}): {n_new} neue 'queued'-Zeilen, "
+              f"{len(merged_ids) - n_new} bereits vorhanden.")
 
 
 def _write_review(path, review):
