@@ -18,7 +18,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -266,6 +266,18 @@ DECISIONS = ["—", "Lead", "uninteressant"]
 _DEC_TO_STORE = {"—": None, "Lead": "lead", "uninteressant": "uninteressant"}
 _STORE_TO_DEC = {None: "—", "lead": "Lead", "uninteressant": "uninteressant"}
 
+# Anruf-Ausgänge (Code -> Label) für das Nachverfolgungs-Tab / outreach_calls.outcome.
+# Reihenfolge = Dropdown-Reihenfolge. "erreicht" = alles außer nicht_erreicht/falsche_nummer.
+OUTCOMES = {
+    "nicht_erreicht": "nicht erreicht",
+    "gesprochen": "gesprochen",
+    "rueckruf_vereinbart": "Rückruf vereinbart",
+    "termin": "Termin vereinbart",
+    "kein_interesse": "kein Interesse",
+    "nicht_zustaendig": "nicht zuständig",
+    "falsche_nummer": "falsche Nummer",
+}
+
 
 def _read_lines() -> list:
     if not SELECTION_FILE.exists():
@@ -374,8 +386,15 @@ with st.expander("Filter / Suchkriterien", expanded=True):
                                               "einer <50. Weich: nächste Generation steht laut Website bereit.")
         alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", value=False)
         groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", value=True)
+        nur_leads = st.checkbox("nur als Lead markierte", value=False,
+                                help="Zeigt ausschließlich Firmen mit Entscheidung „Lead\" "
+                                     "(selected==true in selection.jsonl).")
 
-    suche = st.text_input("Volltextsuche (Name/Ort)", "")
+    r3 = st.columns([1, 3])
+    bearbeitung = r3[0].selectbox(
+        "Bearbeitungsstatus", ["alle", "offen", "bearbeitet"],
+        help="offen = noch nicht entschieden · bearbeitet = als Lead oder uninteressant markiert")
+    suche = r3[1].text_input("Volltextsuche (Name/Ort)", "")
 
 # --- Filter anwenden ---
 f = df.copy()
@@ -410,6 +429,16 @@ if suche.strip():
     q = suche.strip().lower()
     f = f[f["name"].str.lower().str.contains(q) | f["ort"].str.lower().str.contains(q)]
 
+# Bearbeitungsstatus aus dem Review-State ableiten (decision == lead/uninteressant = bearbeitet)
+if bearbeitung != "alle":
+    bearbeitet_mask = f["company_id"].map(
+        lambda cid: reviews.get(cid, {}).get("decision") in ("lead", "uninteressant"))
+    f = f[bearbeitet_mask if bearbeitung == "bearbeitet" else ~bearbeitet_mask]
+
+# Lead-Filter: nur Firmen mit Entscheidung „Lead" (decision == lead == selected)
+if nur_leads:
+    f = f[f["company_id"].map(lambda cid: reviews.get(cid, {}).get("decision") == "lead")]
+
 f = f.sort_values(["klasse", "score", "gf_alter"], ascending=[True, False, False])
 
 # --- Kennzahlen ---
@@ -426,7 +455,7 @@ def _fmt_teur(v):
     return f"{int(v):,}".replace(",", ".") if pd.notna(v) else "—"
 
 
-tab_tbl, tab_card = st.tabs(["Tabelle", "Karteikarte"])
+tab_tbl, tab_card, tab_funnel = st.tabs(["Tabelle", "Karteikarte", "Nachverfolgung"])
 
 # ============================= TABELLE ============================= #
 with tab_tbl:
@@ -495,21 +524,26 @@ with tab_card:
                 "note_ki": st.session_state.get(kkey, ""),
             }
 
-        # --- Navigation ---
-        n1, n2, n3 = st.columns([1, 4, 1])
+        # --- Navigation + Entscheidung (kompakt, wenig Mausstrecke) ---
+        # Zurück/Weiter direkt nebeneinander; Entscheidung unmittelbar darunter.
+        n1, n2, n3 = st.columns([1, 1, 4])
         if n1.button("◀ Zurück", width="stretch", disabled=pos == 0, key="prev"):
             _store_current(); save_reviews(int(wave), reviews, df)
             st.session_state["card_pos"] = pos - 1
             st.rerun()
-        if n3.button("Weiter ▶", width="stretch", disabled=pos >= len(ids) - 1, key="next"):
+        if n2.button("Weiter ▶", width="stretch", disabled=pos >= len(ids) - 1, key="next"):
             _store_current(); save_reviews(int(wave), reviews, df)
             st.session_state["card_pos"] = pos + 1
             st.rerun()
         badge = {"lead": "✅ Lead", "uninteressant": "🚫 uninteressant"}.get(
             reviews.get(cur_cid, {}).get("decision"), "· offen")
-        n2.markdown(
+        n3.markdown(
             f"<div style='text-align:center'>Firma <b>{pos+1}</b> von <b>{len(ids)}</b>"
             f" &nbsp;·&nbsp; {badge}</div>", unsafe_allow_html=True)
+
+        # Entscheidung (offen / Lead / uninteressant) direkt unter Zurück/Weiter
+        st.session_state.setdefault(dkey, _STORE_TO_DEC.get(reviews.get(cur_cid, {}).get("decision")))
+        st.radio("Entscheidung", DECISIONS, horizontal=True, key=dkey, label_visibility="collapsed")
 
         row = f[f["company_id"] == cur_cid].iloc[0]
 
@@ -628,12 +662,10 @@ with tab_card:
         with st.expander("Briefing-Rohtext (für Anruf)", expanded=False):
             st.text(row["begruendung"] or "—")
 
-        # --- Entscheidung + Notizen (Widget-State je Firma initialisieren) ---
-        st.session_state.setdefault(dkey, _STORE_TO_DEC.get(reviews.get(cur_cid, {}).get("decision")))
+        # --- Notizen (Widget-State je Firma initialisieren; Entscheidung steht oben) ---
         st.session_state.setdefault(skey, reviews.get(cur_cid, {}).get("note_self", ""))
         st.session_state.setdefault(kkey, reviews.get(cur_cid, {}).get("note_ki", ""))
 
-        st.radio("Entscheidung", DECISIONS, horizontal=True, key=dkey, label_visibility="collapsed")
         cc = st.columns(2)
         cc[0].text_area("Mein Kommentar", key=skey, height=120,
                         placeholder="Notiz für mich (Recherche, Timing, Kontakt …)")
@@ -668,6 +700,157 @@ with tab_card:
             """,
             height=0,
         )
+
+# =========================== NACHVERFOLGUNG =========================== #
+# CRM-Stufe 1: Brief-Versand (calvoran.outreach) + Nachtelefonieren (calvoran.outreach_calls)
+# je Lead der aktuellen Welle. Vorselektion bleibt in selection.jsonl; die DB ist System of
+# Record ab der Lead-Menge (Backfill / c5 --wave legen die outreach-Zeilen an).
+with tab_funnel:
+    st.caption("Brief-Versand und Nachtelefonieren je Lead dieser Welle · "
+               "Quelle: Supabase calvoran.outreach + outreach_calls.")
+    if not leads:
+        st.info("Noch keine Leads in dieser Welle markiert — erst im Tab „Tabelle“ / "
+                "„Karteikarte“ Firmen als Lead markieren und speichern.")
+    else:
+        cl = get_client()
+        by_id = df.set_index("company_id")
+
+        # --- Brief-Status laden (outreach, channel='letter', diese Welle) ---
+        outreach: dict = {}
+        try:
+            for i in range(0, len(leads), 50):
+                for r in (cl.table("outreach").select("id,company_id,status,sent_at")
+                          .eq("channel", "letter").eq("wave", int(wave))
+                          .in_("company_id", leads[i:i + 50]).execute().data):
+                    outreach[r["company_id"]] = r
+        except Exception as e:                                # noqa: BLE001
+            st.error(f"outreach-Lesefehler: {e}")
+
+        # --- Anrufe laden (outreach_calls; existiert erst nach Migration 0006) ---
+        calls: dict = {}
+        calls_active = True
+        try:
+            for i in range(0, len(leads), 50):
+                for r in (cl.table("outreach_calls")
+                          .select("company_id,called_at,outcome,follow_up_at,notes")
+                          .in_("company_id", leads[i:i + 50])
+                          .order("called_at", desc=True).execute().data):
+                    calls.setdefault(r["company_id"], []).append(r)
+        except Exception:                                     # noqa: BLE001
+            calls_active = False
+            st.warning("Anruf-Log inaktiv — Migration 0006 (outreach_calls) noch nicht im "
+                       "Supabase-Studio angewandt. Brief-Status funktioniert bereits.")
+
+        def _reached(cid: str) -> bool:
+            return any(c["outcome"] not in ("nicht_erreicht", "falsche_nummer")
+                       for c in calls.get(cid, []))
+
+        # --- Funnel-Kennzahlen ---
+        n_leads = len(leads)
+        n_brief = sum(1 for cid in leads if cid in outreach)
+        n_sent = sum(1 for cid in leads if outreach.get(cid, {}).get("status") == "sent")
+        n_called = sum(1 for cid in leads if calls.get(cid))
+        n_reached = sum(1 for cid in leads if _reached(cid))
+        n_termin = sum(1 for cid in leads
+                       if any(c["outcome"] == "termin" for c in calls.get(cid, [])))
+        k = st.columns(6)
+        k[0].metric("Leads", n_leads)
+        k[1].metric("Brief erfasst", n_brief)
+        k[2].metric("versandt", n_sent)
+        k[3].metric("angerufen", n_called)
+        k[4].metric("erreicht", n_reached)
+        k[5].metric("Termine", n_termin)
+        if n_brief < n_leads:
+            st.caption(f"{n_leads - n_brief} Leads ohne outreach-Zeile — einmalig "
+                       "`pipeline/backfill_outreach_from_selection.py` laufen lassen "
+                       "oder Briefe mit `c5 --wave` erzeugen.")
+
+        # --- Brief-Versand markieren (queued -> sent für die ganze Welle) ---
+        with st.expander("Brief-Versand markieren", expanded=False):
+            n_queued = sum(1 for cid in leads
+                           if outreach.get(cid, {}).get("status") == "queued")
+            cvs = st.columns([2, 1, 1])
+            sent_date = cvs[0].date_input("Versanddatum", value=date.today(), key="sent_date")
+            cvs[1].markdown(f"<div style='padding-top:1.8rem'>{n_queued} offen (queued)</div>",
+                            unsafe_allow_html=True)
+            with cvs[2]:
+                st.markdown("<div style='padding-top:1.0rem'></div>", unsafe_allow_html=True)
+                if st.button(f"Welle {int(wave)} als versandt", type="primary",
+                             disabled=n_queued == 0, key="mark_sent"):
+                    try:
+                        (cl.table("outreach")
+                         .update({"status": "sent", "sent_at": sent_date.isoformat()})
+                         .eq("channel", "letter").eq("wave", int(wave))
+                         .eq("status", "queued").execute())
+                        st.toast(f"{n_queued} Briefe als versandt markiert.")
+                        st.rerun()
+                    except Exception as e:                    # noqa: BLE001
+                        st.error(f"Update fehlgeschlagen: {e}")
+
+        # --- Lead-Übersicht ---
+        st.markdown("##### Lead-Übersicht")
+        nur_offen = st.checkbox("nur noch nicht angerufene Leads", value=False, key="nf_open")
+        today_iso = date.today().isoformat()
+        rows = []
+        for cid in leads:
+            cs = calls.get(cid, [])
+            if nur_offen and cs:
+                continue
+            last = cs[0] if cs else None
+            fu = next((c["follow_up_at"] for c in cs if c.get("follow_up_at")), None)
+            rows.append({
+                "Firma": by_id.loc[cid, "name"] if cid in by_id.index else cid,
+                "Brief": outreach.get(cid, {}).get("status") or "—",
+                "versandt": (outreach.get(cid, {}).get("sent_at") or "")[:10],
+                "Anrufe": len(cs),
+                "letzter Ausgang": OUTCOMES.get(last["outcome"], "") if last else "—",
+                "Wiedervorlage": (fu or "")[:10],
+                "fällig": "⚠" if fu and fu[:10] <= today_iso else "",
+            })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=320)
+        else:
+            st.info("Keine Treffer im Filter.")
+
+        # --- Anruf erfassen (braucht outreach_calls) ---
+        if calls_active:
+            st.markdown("##### Anruf erfassen")
+            name_to_cid = {(by_id.loc[cid, "name"] if cid in by_id.index else cid): cid
+                           for cid in leads}
+            sel_name = st.selectbox("Firma", sorted(name_to_cid), key="call_firma")
+            sel_cid = name_to_cid[sel_name]
+            with st.form("call_form", clear_on_submit=True):
+                fc = st.columns([1, 1, 1])
+                c_date = fc[0].date_input("Datum", value=date.today())
+                c_outcome = fc[1].selectbox("Ausgang", list(OUTCOMES),
+                                            format_func=lambda o: OUTCOMES[o])
+                set_fu = fc[2].checkbox("Wiedervorlage setzen")
+                fu_date = fc[2].date_input("Wiedervorlage am", value=date.today())
+                c_notes = st.text_area(
+                    "Notiz", placeholder="Gesprächsnotiz, Ansprechpartner, nächster Schritt …")
+                if st.form_submit_button("Anruf speichern", type="primary"):
+                    rec = {"company_id": sel_cid, "called_at": c_date.isoformat(),
+                           "outcome": c_outcome, "notes": c_notes.strip() or None}
+                    oid = outreach.get(sel_cid, {}).get("id")
+                    if oid:
+                        rec["outreach_id"] = oid
+                    if set_fu:
+                        rec["follow_up_at"] = fu_date.isoformat()
+                    try:
+                        cl.table("outreach_calls").insert(rec).execute()
+                        st.toast("Anruf gespeichert.")
+                        st.rerun()
+                    except Exception as e:                    # noqa: BLE001
+                        st.error(f"Speichern fehlgeschlagen: {e}")
+
+            hist = calls.get(sel_cid, [])
+            if hist:
+                st.markdown(f"**Historie {sel_name}** ({len(hist)})")
+                for c in hist:
+                    fu = f" · Wiedervorlage {c['follow_up_at'][:10]}" if c.get("follow_up_at") else ""
+                    note = f" — {c['notes']}" if c.get("notes") else ""
+                    st.markdown(f"- {(c['called_at'] or '')[:10]} · "
+                                f"**{OUTCOMES.get(c['outcome'], c['outcome'])}**{fu}{note}")
 
 st.caption(
     f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true (decision==lead) je Welle.  "
