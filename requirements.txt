@@ -15,3 +15,4 @@ pydantic>=2.0           # Dossier-Schemas (calvoran/schemas.py)
 # Kuratierungs-Dashboard (Phase 5-Vorstufe): Lead-Auswahl vor Ansprache
 streamlit>=1.58          # dashboard/kuratierung.py
 pandas>=2.0              # Tabellen-Backing fürs Dashboard
+phonenumbers>=8.13       # DIN-nahe Rufnummer-Formatierung im Nachverfolgungs-Tab

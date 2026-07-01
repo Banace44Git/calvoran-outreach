@@ -18,10 +18,12 @@ import json
 import os
 import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
+import phonenumbers
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -80,6 +82,103 @@ def _kv_table(pairs):
         f"<td style='padding:1px 0;text-align:right'>{v}</td></tr>"
         for k, v in pairs)
     return f"<table style='width:100%;font-size:0.9rem;border-collapse:collapse'>{body}</table>"
+
+
+def _tel_href(tel: str) -> str:
+    """'+49 2303 301030' -> 'tel:+492303301030' (nur Ziffern und +); leer -> ''."""
+    cleaned = re.sub(r"[^\d+]", "", tel or "")
+    return f"tel:{cleaned}" if cleaned else ""
+
+
+def _din_phone(raw: str) -> str:
+    """Deutsche Rufnummer DIN-5008-nah: '+49 228648040' -> '+49(0) 228 64 80 40'.
+    Vorwahl über libphonenumber getrennt, Teilnehmernummer in Zweiergruppen von rechts.
+    Ungültiges/Ausländisches bleibt Rohwert."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        x = phonenumbers.parse(raw, "DE")
+        if not phonenumbers.is_valid_number(x):
+            return raw
+        nat = phonenumbers.format_number(x, phonenumbers.PhoneNumberFormat.NATIONAL)
+    except phonenumbers.NumberParseException:
+        return raw
+    head, _, rest = nat.partition(" ")
+    area = head.lstrip("0")
+    local = "".join(c for c in rest if c.isdigit())
+    groups: list = []
+    while len(local) > 2:
+        groups.insert(0, local[-2:])
+        local = local[:-2]
+    groups.insert(0, local)
+    return f"+49(0) {area} " + " ".join(g for g in groups if g)
+
+
+def _localize(iso: str):
+    """ISO-String -> datetime; tz-bewusste Werte in Ortszeit (sonst driftet ein als
+    timestamptz gespeicherter Termin um den UTC-Offset)."""
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return dt.astimezone() if dt.tzinfo is not None else dt
+
+
+def _de_date(iso: str) -> str:
+    """ISO-Datum/Zeitstempel -> 'TT.MM.JJJJ' (europäisch); leer/kaputt -> Rohschnitt."""
+    iso = (iso or "").strip()
+    if not iso:
+        return ""
+    try:
+        return _localize(iso).strftime("%d.%m.%Y")
+    except ValueError:
+        return iso[:10]
+
+
+def _de_dt(iso: str) -> str:
+    """ISO-Zeitstempel -> 'TT.MM.JJJJ HH:MM' (24h, Ortszeit)."""
+    iso = (iso or "").strip()
+    if not iso:
+        return ""
+    try:
+        return _localize(iso).strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        return iso[:16]
+
+
+# Absender für E-Mail-Nachfass (Gmail-Compose erzwingt das Konto über authuser).
+CALVORAN_SENDER = "johannes.breuers@calvoran.de"
+
+
+def _gmail_compose(to: str, subject: str = "") -> str:
+    """Gmail-Web-Compose-Link, der als Absender CALVORAN_SENDER wählt (mailto: kann den
+    Absender nicht setzen)."""
+    q = f"authuser={quote(CALVORAN_SENDER)}&view=cm&fs=1&to={quote(to)}"
+    if subject:
+        q += f"&su={quote(subject)}"
+    return f"https://mail.google.com/mail/?{q}"
+
+
+def _briefing(begr: str, ort: str, plz: str, branche: str) -> str:
+    """Kuratiertes Anruf-Briefing aus der Score-Begründung: Titelzeile (Score/Klasse),
+    Cluster/WZ und Web-Bedarf-Zeile (inkl. '2. Ebene sichtbar') raus; Standort-Zeile mit
+    Branche statt WZ/Cluster; die begründungseigene 'Hooks:'-Zeile raus (wird separat einmal
+    gerendert)."""
+    loc = " ".join(p for p in [(ort or "").strip(), f"({plz})" if plz else ""] if p)
+    out: list = []
+    for ln in (begr or "").splitlines():
+        s = ln.strip()
+        if re.search(r"—\s*Score\s", s):
+            continue
+        if s.startswith("Standort"):
+            out.append(f"Standort {loc} · Branche: {branche}".rstrip(" ··")
+                       if branche else (f"Standort {loc}" if loc else ""))
+            continue
+        if s.startswith("Web-Bedarf"):
+            continue
+        if s.startswith("Hooks:"):
+            continue
+        out.append(ln)
+    return "\n".join(out).strip()
+
 
 # Köln-Bonn-Default-Region (PLZ-2-Steller); weitere Bereiche (Ruhrgebiet etc.)
 # tauchen automatisch in der Multiselect auf, sobald der Datenbestand wächst.
@@ -155,6 +254,29 @@ def load_personen() -> dict:
                 "rolle": (r.get("rolle") or "").strip(),
                 "ist_gf": (r.get("ist_gf") or "").strip() == "1",
             })
+    return out
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_contacts(company_ids: tuple) -> dict:
+    """company_id -> {tel, email, gf} — on-demand nur für die Leads einer Welle, aus
+    companies.raw ('Tel.'/'E-Mail') + ges_vertreter. Bewusst nicht im Full-Frame, um das
+    große raw-JSONB nicht für alle gescorten Firmen mitzuladen."""
+    if not company_ids:
+        return {}
+    cl = get_client()
+    ids = list(company_ids)
+    out: dict = {}
+    for i in range(0, len(ids), 50):
+        for c in (cl.table("companies").select("id,ges_vertreter,raw")
+                  .in_("id", ids[i:i + 50]).execute().data):
+            raw = c.get("raw") or {}
+            gv = c.get("ges_vertreter") or []
+            out[c["id"]] = {
+                "tel": (raw.get("Tel.") or "").strip(),
+                "email": (raw.get("E-Mail") or "").strip(),
+                "gf": ", ".join(gv) if isinstance(gv, list) else str(gv or ""),
+            }
     return out
 
 
@@ -277,6 +399,18 @@ OUTCOMES = {
     "nicht_zustaendig": "nicht zuständig",
     "falsche_nummer": "falsche Nummer",
 }
+
+# Lead-Disposition = Status der Brief-outreach-Zeile jenseits von queued/sent. Vokabular
+# stammt aus sql/schema.sql (won/rejected/no_response) — keine Schema-Änderung nötig.
+DISPO = {
+    "sent": "offen", "opened": "offen", "replied": "offen",
+    "no_response": "keine Reaktion", "won": "gewonnen", "rejected": "verloren",
+}
+DISPO_STATES = ["sent", "won", "rejected", "no_response"]      # manuell wählbare Disposition
+DISPO_LABEL = {"sent": "offen", "won": "gewonnen", "rejected": "verloren",
+               "no_response": "keine Reaktion"}
+# Vorschlag aus dem letzten Anruf-Ausgang -> Disposition.
+OUTCOME_TO_DISPO = {"termin": "won", "kein_interesse": "rejected"}
 
 
 def _read_lines() -> list:
@@ -715,16 +849,21 @@ with tab_funnel:
         cl = get_client()
         by_id = df.set_index("company_id")
 
-        # --- Brief-Status laden (outreach, channel='letter', diese Welle) ---
-        outreach: dict = {}
+        # --- Brief- + E-Mail-Status laden (outreach, diese Welle) ---
+        outreach: dict = {}      # company_id -> Brief-Zeile (channel='letter')
+        emails: dict = {}        # company_id -> E-Mail-Nachfass-Zeile (channel='email')
         try:
             for i in range(0, len(leads), 50):
-                for r in (cl.table("outreach").select("id,company_id,status,sent_at")
-                          .eq("channel", "letter").eq("wave", int(wave))
+                for r in (cl.table("outreach")
+                          .select("id,company_id,channel,status,sent_at,response_at")
+                          .in_("channel", ["letter", "email"]).eq("wave", int(wave))
                           .in_("company_id", leads[i:i + 50]).execute().data):
-                    outreach[r["company_id"]] = r
+                    (outreach if r["channel"] == "letter" else emails)[r["company_id"]] = r
         except Exception as e:                                # noqa: BLE001
             st.error(f"outreach-Lesefehler: {e}")
+
+        # --- Kontaktdaten (Tel./E-Mail/GF) on-demand nur für die Leads ---
+        contact = load_contacts(tuple(sorted(leads)))
 
         # --- Anrufe laden (outreach_calls; existiert erst nach Migration 0006) ---
         calls: dict = {}
@@ -745,21 +884,65 @@ with tab_funnel:
             return any(c["outcome"] not in ("nicht_erreicht", "falsche_nummer")
                        for c in calls.get(cid, []))
 
-        # --- Funnel-Kennzahlen ---
+        def _name(cid: str) -> str:
+            return by_id.loc[cid, "name"] if cid in by_id.index else cid
+
+        def _score(cid: str):
+            return by_id.loc[cid, "score"] if cid in by_id.index else -1
+
+        def _followup(cid: str):
+            """Wiedervorlage-Datum des jüngsten Anrufs, der eine gesetzt hat (ISO), sonst None.
+            calls sind desc nach called_at sortiert, der erste Treffer ist also der aktuellste."""
+            for c in calls.get(cid, []):
+                if c.get("follow_up_at"):
+                    return c["follow_up_at"][:10]
+            return None
+
+        today_iso = date.today().isoformat()
+
+        def _priority(cid: str) -> int:
+            """0 überfällig · 1 heute fällig · 2 neu (nie angerufen) · 3 offen ·
+            4 keine Reaktion · 5 abgeschlossen (gewonnen/verloren)."""
+            lstat = (outreach.get(cid) or {}).get("status")
+            if lstat in ("won", "rejected"):
+                return 5
+            fu = _followup(cid)
+            if fu and fu < today_iso:
+                return 0
+            if fu and fu == today_iso:
+                return 1
+            if not calls.get(cid):
+                return 2
+            if lstat == "no_response":
+                return 4
+            return 3
+
+        # --- Funnel-Kennzahlen: Aktivität + Ergebnis ---
         n_leads = len(leads)
         n_brief = sum(1 for cid in leads if cid in outreach)
-        n_sent = sum(1 for cid in leads if outreach.get(cid, {}).get("status") == "sent")
+        n_sent = sum(1 for cid in leads
+                     if outreach.get(cid, {}).get("status") not in (None, "queued"))
+        n_mail = sum(1 for cid in leads if emails.get(cid, {}).get("status") == "sent")
         n_called = sum(1 for cid in leads if calls.get(cid))
         n_reached = sum(1 for cid in leads if _reached(cid))
-        n_termin = sum(1 for cid in leads
-                       if any(c["outcome"] == "termin" for c in calls.get(cid, [])))
-        k = st.columns(6)
-        k[0].metric("Leads", n_leads)
-        k[1].metric("Brief erfasst", n_brief)
-        k[2].metric("versandt", n_sent)
-        k[3].metric("angerufen", n_called)
-        k[4].metric("erreicht", n_reached)
-        k[5].metric("Termine", n_termin)
+        n_due = sum(1 for cid in leads
+                    if (fu := _followup(cid)) and fu <= today_iso
+                    and outreach.get(cid, {}).get("status") not in ("won", "rejected"))
+        n_won = sum(1 for cid in leads if outreach.get(cid, {}).get("status") == "won")
+        n_lost = sum(1 for cid in leads if outreach.get(cid, {}).get("status") == "rejected")
+        n_open = n_leads - n_won - n_lost
+        a = st.columns(5)
+        a[0].metric("Leads", n_leads)
+        a[1].metric("versandt", n_sent)
+        a[2].metric("E-Mail-Nachfass", n_mail)
+        a[3].metric("angerufen", n_called)
+        a[4].metric("erreicht", n_reached)
+        b = st.columns(5)
+        b[0].metric("offen", n_open)
+        b[1].metric("gewonnen", n_won)
+        b[2].metric("verloren", n_lost)
+        b[3].metric("Wiedervorlagen fällig", n_due)
+        b[4].metric("Brief erfasst", n_brief)
         if n_brief < n_leads:
             st.caption(f"{n_leads - n_brief} Leads ohne outreach-Zeile — einmalig "
                        "`pipeline/backfill_outreach_from_selection.py` laufen lassen "
@@ -787,70 +970,226 @@ with tab_funnel:
                     except Exception as e:                    # noqa: BLE001
                         st.error(f"Update fehlgeschlagen: {e}")
 
-        # --- Lead-Übersicht ---
-        st.markdown("##### Lead-Übersicht")
-        nur_offen = st.checkbox("nur noch nicht angerufene Leads", value=False, key="nf_open")
-        today_iso = date.today().isoformat()
+        # --- Priorisierte Arbeitsliste (wen jetzt anrufen) ---
+        st.markdown("##### Arbeitsliste — priorisiert")
+        nur_offen = st.checkbox("nur noch nicht abgeschlossene", value=True, key="nf_open",
+                                help="blendet gewonnene/verlorene Leads aus")
+        PRIO_LABEL = {0: "überfällig", 1: "heute fällig", 2: "neu", 3: "offen",
+                      4: "keine Reaktion", 5: "abgeschlossen"}
+        ordered = sorted(leads, key=lambda cid: (_priority(cid), -(_score(cid) or -1),
+                                                  _name(cid).lower()))
         rows = []
-        for cid in leads:
-            cs = calls.get(cid, [])
-            if nur_offen and cs:
+        ordered_shown = []       # cids in Anzeige-Reihenfolge, parallel zu rows
+        for cid in ordered:
+            prio = _priority(cid)
+            if nur_offen and prio == 5:
                 continue
+            cs = calls.get(cid, [])
             last = cs[0] if cs else None
-            fu = next((c["follow_up_at"] for c in cs if c.get("follow_up_at")), None)
+            fu = _followup(cid)
+            ct = contact.get(cid, {})
+            faellig = ("überfällig" if fu and fu < today_iso else
+                       "heute" if fu and fu == today_iso else "")
+            ordered_shown.append(cid)
             rows.append({
-                "Firma": by_id.loc[cid, "name"] if cid in by_id.index else cid,
-                "Brief": outreach.get(cid, {}).get("status") or "—",
-                "versandt": (outreach.get(cid, {}).get("sent_at") or "")[:10],
+                "öffnen": False,
+                "Prio": PRIO_LABEL[prio],
+                "Firma": _name(cid),
+                "Tel.": _din_phone(ct.get("tel", "")),
+                "GF": ct.get("gf", ""),
                 "Anrufe": len(cs),
                 "letzter Ausgang": OUTCOMES.get(last["outcome"], "") if last else "—",
-                "Wiedervorlage": (fu or "")[:10],
-                "fällig": "⚠" if fu and fu[:10] <= today_iso else "",
+                "Wiedervorlage": _de_date(fu),
+                "fällig": faellig,
+                "Disposition": DISPO.get((outreach.get(cid) or {}).get("status"), "—"),
+                "E-Mail": "gesendet" if emails.get(cid, {}).get("status") == "sent" else "",
             })
         if rows:
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=320)
+            st.caption("Spalte „öffnen“ anhaken → die Firma öffnet unten im Anruf-Cockpit.")
+            # data_editor statt dataframe, weil nur so eine anklickbare Spalte möglich ist.
+            # Der Editor-Key trägt eine Nonce, damit der Haken nach dem Öffnen zurückgesetzt
+            # wird (frischer Editor). Alle übrigen Spalten sind schreibgeschützt.
+            wl_nonce = st.session_state.get("wl_nonce", 0)
+            edited = st.data_editor(
+                pd.DataFrame(rows), hide_index=True, width="stretch", height=360,
+                key=f"wl_{wl_nonce}",
+                disabled=[c for c in rows[0] if c != "öffnen"],
+                column_config={"öffnen": st.column_config.CheckboxColumn(
+                    "öffnen", help="im Anruf-Cockpit öffnen", width="small")})
+            picked = [i for i, v in enumerate(edited["öffnen"].tolist()) if v]
+            if picked:
+                st.session_state["call_firma_next"] = ordered_shown[picked[0]]
+                st.session_state["wl_nonce"] = wl_nonce + 1
+                st.rerun()
         else:
-            st.info("Keine Treffer im Filter.")
+            st.info("Keine offenen Leads — alle abgeschlossen.")
 
-        # --- Anruf erfassen (braucht outreach_calls) ---
+        # --- Anruf-Cockpit: Kontaktkarte + Briefing + Erfassung + Disposition/E-Mail ---
+        st.markdown("##### Anruf-Cockpit")
+        # Firmen in Priorisierungs-Reihenfolge (cid = stabiler Selectbox-Wert, damit
+        # Auto-Advance nach dem Speichern robust auf die nächste Firma springt).
+        # Alle Leads wählbar (auch abgeschlossene, damit „öffnen“ aus der Liste jede Zeile
+        # trifft); offene stehen durch die Prio-Sortierung ohnehin oben.
+        cockpit_order = ordered
+        # Auto-Advance einlösen: ein Widget-Key darf nach Instanziierung nicht mehr gesetzt
+        # werden, daher der Umweg über den freien Key 'call_firma_next', der VOR dem Selectbox
+        # in den Widget-Key übernommen wird.
+        _pending = st.session_state.pop("call_firma_next", "__keep__")
+        if _pending != "__keep__":
+            if _pending in cockpit_order:
+                st.session_state["call_firma"] = _pending
+            else:
+                st.session_state.pop("call_firma", None)
+        if st.session_state.get("call_firma") not in cockpit_order:
+            st.session_state.pop("call_firma", None)
+        sel_cid = st.selectbox(
+            "Firma", cockpit_order, key="call_firma",
+            format_func=lambda cid: f"{PRIO_LABEL[_priority(cid)]} · {_name(cid)}")
+        sel_name = _name(sel_cid)
+        ct = contact.get(sel_cid, {})
+
+        # Kontaktkarte: DIN-Telefon als klickbarer tel:-Link, E-Mail als Gmail-Compose
+        # (Absender = CALVORAN_SENDER), Website.
+        links = []
+        if ct.get("tel"):
+            links.append(f"[{_din_phone(ct['tel'])}]({_tel_href(ct['tel'])})")
+        if ct.get("email"):
+            links.append(f"[{ct['email']}]({_gmail_compose(ct['email'])})")
+        web = by_id.loc[sel_cid, "website"] if sel_cid in by_id.index else ""
+        if web:
+            links.append(f"[Website]({web})")
+        st.markdown(f"**{sel_name}** · GF: {ct.get('gf') or '—'}")
+        st.markdown("Kontakt: " + (" · ".join(links) if links
+                    else "keine Kontaktdaten (Nummer manuell/Lusha nachziehen)"))
+
+        # Anruf-Briefing: kuratierte Score-Begründung (ohne Score/Klasse/Cluster/Web-Bedarf,
+        # Standort mit Branche) + Ansprache-Hooks einmalig.
+        if sel_cid in by_id.index:
+            row = by_id.loc[sel_cid]
+            brief = _briefing(row.get("begruendung", ""), row.get("ort", ""),
+                              row.get("plz", ""), row.get("branche_wz", ""))
+            hooks = row.get("hooks")
+            with st.expander("Anruf-Briefing", expanded=True):
+                if brief:
+                    st.markdown(brief.replace("\n", "  \n"))
+                if isinstance(hooks, (list, tuple)) and len(hooks):
+                    st.markdown("**Hooks:** " + " · ".join(str(h) for h in hooks))
+
+        # --- Anruf erfassen (nicht-Form, damit 'Termin' sofort Datum+Uhrzeit einblendet) ---
         if calls_active:
-            st.markdown("##### Anruf erfassen")
-            name_to_cid = {(by_id.loc[cid, "name"] if cid in by_id.index else cid): cid
-                           for cid in leads}
-            sel_name = st.selectbox("Firma", sorted(name_to_cid), key="call_firma")
-            sel_cid = name_to_cid[sel_name]
-            with st.form("call_form", clear_on_submit=True):
-                fc = st.columns([1, 1, 1])
-                c_date = fc[0].date_input("Datum", value=date.today())
-                c_outcome = fc[1].selectbox("Ausgang", list(OUTCOMES),
-                                            format_func=lambda o: OUTCOMES[o])
-                set_fu = fc[2].checkbox("Wiedervorlage setzen")
-                fu_date = fc[2].date_input("Wiedervorlage am", value=date.today())
-                c_notes = st.text_area(
-                    "Notiz", placeholder="Gesprächsnotiz, Ansprechpartner, nächster Schritt …")
-                if st.form_submit_button("Anruf speichern", type="primary"):
-                    rec = {"company_id": sel_cid, "called_at": c_date.isoformat(),
-                           "outcome": c_outcome, "notes": c_notes.strip() or None}
-                    oid = outreach.get(sel_cid, {}).get("id")
-                    if oid:
-                        rec["outreach_id"] = oid
-                    if set_fu:
-                        rec["follow_up_at"] = fu_date.isoformat()
+            st.markdown("**Anruf erfassen**")
+            r1 = st.columns([1, 1])
+            c_date = r1[0].date_input("Datum des Anrufs", value=date.today(),
+                                      format="DD.MM.YYYY", key=f"cdate_{sel_cid}")
+            c_outcome = r1[1].selectbox("Ausgang", list(OUTCOMES),
+                                        format_func=lambda o: OUTCOMES[o], key=f"cout_{sel_cid}")
+            fu_iso = None
+            if c_outcome == "termin":
+                r2 = st.columns([1, 1])
+                t_date = r2[0].date_input("Termin am", value=date.today(),
+                                          format="DD.MM.YYYY", key=f"tdate_{sel_cid}")
+                t_time = r2[1].time_input("Uhrzeit", value=time(10, 0), key=f"ttime_{sel_cid}")
+                # Ortszeit-Offset mitschreiben, sonst driftet der Termin als timestamptz.
+                fu_iso = datetime.combine(t_date, t_time).astimezone().isoformat()
+            else:
+                r2 = st.columns([1, 1])
+                set_fu = r2[0].checkbox("Wiedervorlage setzen", key=f"cfu_{sel_cid}")
+                fu_date = r2[1].date_input("Wiedervorlage am", value=date.today(),
+                                           format="DD.MM.YYYY", key=f"cfud_{sel_cid}")
+                if set_fu:
+                    fu_iso = fu_date.isoformat()
+            c_notes = st.text_area(
+                "Notiz", key=f"cnotes_{sel_cid}",
+                placeholder="Gesprächsnotiz, Ansprechpartner, nächster Schritt …")
+            if st.button("Anruf speichern", type="primary", key=f"csave_{sel_cid}"):
+                rec = {"company_id": sel_cid, "called_at": c_date.isoformat(),
+                       "outcome": c_outcome, "notes": c_notes.strip() or None}
+                oid = outreach.get(sel_cid, {}).get("id")
+                if oid:
+                    rec["outreach_id"] = oid
+                if fu_iso:
+                    rec["follow_up_at"] = fu_iso
+                try:
+                    cl.table("outreach_calls").insert(rec).execute()
+                    st.toast("Anruf gespeichert.")
+                    # Auto-Advance: nächsten OFFENEN Lead in der Reihenfolge öffnen. Freier
+                    # Key (kein Widget-Key) -> im nächsten Run vor dem Selectbox eingelöst.
+                    idx = cockpit_order.index(sel_cid)
+                    st.session_state["call_firma_next"] = next(
+                        (c for c in cockpit_order[idx + 1:] if _priority(c) != 5), None)
+                    st.rerun()
+                except Exception as e:                        # noqa: BLE001
+                    st.error(f"Speichern fehlgeschlagen: {e}")
+        else:
+            st.info("Anruf-Erfassung inaktiv — Migration 0006 (outreach_calls) fehlt.")
+
+        # --- Disposition + E-Mail-Nachfass für die gewählte Firma ---
+        dc = st.columns(2)
+        with dc[0]:
+            st.markdown("**Disposition**")
+            lrow = outreach.get(sel_cid)
+            if not lrow:
+                st.caption("Keine Brief-Zeile — erst Backfill / `c5 --wave` laufen lassen.")
+            else:
+                cur = lrow.get("status")
+                last = (calls.get(sel_cid) or [None])[0]
+                sugg = OUTCOME_TO_DISPO.get(last["outcome"]) if last else None
+                if sugg and cur not in ("won", "rejected"):
+                    st.caption(f"Vorschlag aus letztem Ausgang: {DISPO_LABEL[sugg]}")
+                default = cur if cur in DISPO_STATES else (sugg or "sent")
+                new_dispo = st.selectbox(
+                    "Status", DISPO_STATES, index=DISPO_STATES.index(default),
+                    format_func=lambda s: DISPO_LABEL[s], key=f"dispo_{sel_cid}")
+                if st.button("Disposition speichern", key=f"disposave_{sel_cid}"):
+                    upd = {"status": new_dispo}
+                    if new_dispo in ("won", "rejected", "no_response"):
+                        upd["response_at"] = datetime.now(timezone.utc).isoformat()
                     try:
-                        cl.table("outreach_calls").insert(rec).execute()
-                        st.toast("Anruf gespeichert.")
+                        cl.table("outreach").update(upd).eq("id", lrow["id"]).execute()
+                        st.toast(f"Disposition: {DISPO_LABEL[new_dispo]}")
+                        st.rerun()
+                    except Exception as e:                    # noqa: BLE001
+                        st.error(f"Update fehlgeschlagen: {e}")
+        with dc[1]:
+            st.markdown("**E-Mail-Nachfass**")
+            erow = emails.get(sel_cid)
+            if erow and erow.get("status") == "sent":
+                st.caption(f"verschickt am {_de_date(erow.get('sent_at'))}")
+            else:
+                if ct.get("email"):
+                    st.markdown(f"[E-Mail verfassen (Absender {CALVORAN_SENDER})]"
+                                f"({_gmail_compose(ct['email'])})")
+                else:
+                    st.caption("keine E-Mail-Adresse hinterlegt")
+                if st.button("Als verschickt markieren", key=f"mailsent_{sel_cid}",
+                             disabled=not ct.get("email")):
+                    ts = date.today().isoformat()
+                    try:
+                        if erow:
+                            (cl.table("outreach").update({"status": "sent", "sent_at": ts})
+                             .eq("id", erow["id"]).execute())
+                        else:
+                            cl.table("outreach").insert({
+                                "company_id": sel_cid, "channel": "email",
+                                "status": "sent", "sent_at": ts, "wave": int(wave)}).execute()
+                        st.toast("E-Mail-Nachfass erfasst.")
                         st.rerun()
                     except Exception as e:                    # noqa: BLE001
                         st.error(f"Speichern fehlgeschlagen: {e}")
 
-            hist = calls.get(sel_cid, [])
-            if hist:
-                st.markdown(f"**Historie {sel_name}** ({len(hist)})")
-                for c in hist:
-                    fu = f" · Wiedervorlage {c['follow_up_at'][:10]}" if c.get("follow_up_at") else ""
-                    note = f" — {c['notes']}" if c.get("notes") else ""
-                    st.markdown(f"- {(c['called_at'] or '')[:10]} · "
-                                f"**{OUTCOMES.get(c['outcome'], c['outcome'])}**{fu}{note}")
+        hist = calls.get(sel_cid, [])
+        if hist:
+            st.markdown(f"**Historie {sel_name}** ({len(hist)})")
+            for c in hist:
+                if c.get("outcome") == "termin" and c.get("follow_up_at"):
+                    extra = f" · Termin {_de_dt(c['follow_up_at'])}"
+                elif c.get("follow_up_at"):
+                    extra = f" · Wiedervorlage {_de_date(c['follow_up_at'])}"
+                else:
+                    extra = ""
+                note = f" — {c['notes']}" if c.get("notes") else ""
+                st.markdown(f"- {_de_date(c.get('called_at'))} · "
+                            f"**{OUTCOMES.get(c['outcome'], c['outcome'])}**{extra}{note}")
 
 st.caption(
     f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true (decision==lead) je Welle.  "
