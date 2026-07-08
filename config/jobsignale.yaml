@@ -11,8 +11,8 @@ keywords:                             # BA-Freitextsuche `was`, je Keyword ein S
   - "Kaufmännische Leitung"
   - "Kaufmännischer Leiter"           # BA-Titel sind oft maskulin ausgeschrieben
   - "CFO"
-  - "Betriebsleiter"                  # Rauschkandidat (Gastro/Elektro) — nach Sichtungsmonat prüfen
   - "Assistenz der Geschäftsführung"  # »mit Perspektive« steht nur im Volltext -> Phase B
+  # "Betriebsleiter" entfernt (Jo, 08.07.2026): überwiegend Gastro/Technik-Rauschen.
 
 # Die BA-Freitextsuche `was` matcht den GANZEN Anzeigentext, nicht nur den Titel —
 # ohne Titel-Filter landen z.B. Verkäufer-Anzeigen im Ergebnis, weil »Geschäftsführer«
@@ -20,14 +20,29 @@ keywords:                             # BA-Freitextsuche `was`, je Keyword ein S
 # (ASCII, lower) gegen Titel + Hauptberuf. Verworfene werden gezählt, nicht still gedroppt.
 titel_filter:
   aktiv: true
-  begriffe:
+  begriffe:                      # Positiv: Titel ODER BA-Hauptberuf muss eins enthalten
     - "geschaftsfuhr"            # Geschäftsführer/-in, -führung
     - "geschaftsleit"            # Geschäftsleitung/-leiter
     - "kaufmannische leit"       # Kaufmännische Leitung
     - "kaufmannischer leit"      # Kaufmännischer Leiter
     - "kaufm leit"
     - "cfo"
-    - "betriebsleit"             # Betriebsleiter/-leitung
+  # Negativ (Jo, 08.07.2026): Datenmüll-Muster, geprüft NUR gegen den Stellentitel —
+  # bewusst nicht gegen den BA-Hauptberuf (dessen Taxonomie klassifiziert echte
+  # kaufmännische Leitungen als »Betriebsleiter/in - kaufmännisch«). Exclude schlägt Positiv.
+  exclude:
+    - "schichtleit"              # Schichtleit*
+    - "assistenz der geschaftsleitung"
+    - "managementassisten"       # Managementassisten*
+    - "technischer leiter"
+    - "technische leitung"
+    - "betriebsleit"             # Betriebsleiter*/-leitung
+    - "general manager"
+    - "restaurantleiter"
+    - "serviceleit"              # Serviceleit*
+    - "franchisepartner"
+    - "zeitarbeit"               # Zeitarbeit*
+    - "jurist"
 
 api:
   veroeffentlichtseit: 7              # Default für --since. Die v6-API akzeptiert NUR

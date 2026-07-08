@@ -82,16 +82,38 @@ def welle1_ids() -> set[str]:
     return ids
 
 
+def titel_regeln(cfg: dict):
+    """(positiv, negativ) — normalisierte Substring-Listen aus titel_filter."""
+    tf = cfg.get("titel_filter") or {}
+    if not tf.get("aktiv"):
+        return [], []
+    return ([norm_text(b) for b in tf.get("begriffe", [])],
+            [norm_text(e) for e in tf.get("exclude", [])])
+
+
+def titel_ok(p: dict, begriffe: list[str], negativ: list[str]) -> bool:
+    """Positiv: Titel ODER BA-Hauptberuf nennt eine Führungsfunktion. Negativ (schlägt
+    Positiv): Datenmüll-Muster NUR im Stellentitel — nicht im Hauptberuf, dessen
+    BA-Taxonomie echte kaufm. Leitungen als »Betriebsleiter/in - kaufmännisch« führt."""
+    titel = norm_text(p["titel"])
+    if negativ and any(e in titel for e in negativ):
+        return False
+    if begriffe:
+        beides = norm_text(f"{p['titel']} {p['beruf'] or ''}")
+        if not any(b in beides for b in begriffe):
+            return False
+    return True
+
+
 def api_pull(cfg: dict, tage: int) -> tuple[dict[str, dict], Counter, int]:
     """Alle Keywords scannen; Dedup über refnr (erstes Keyword gewinnt).
 
-    `was` matcht den ganzen Anzeigentext — der Titel-Filter hält nur Anzeigen, deren
-    Titel/Hauptberuf tatsächlich eine Führungsfunktion nennt (Anzahl Drops im Rückgabewert).
+    `was` matcht den ganzen Anzeigentext — der Titel-Filter (positiv + negativ) hält
+    nur Führungs-Anzeigen (Anzahl Drops im Rückgabewert, kein stilles Verwerfen).
     """
     api = cfg["api"]
     excludes = [e.lower() for e in (cfg.get("exclude_arbeitgeber") or [])]
-    tf = cfg.get("titel_filter") or {}
-    begriffe = [norm_text(b) for b in tf.get("begriffe", [])] if tf.get("aktiv") else []
+    begriffe, negativ = titel_regeln(cfg)
     postings: dict[str, dict] = {}
     je_keyword: Counter = Counter()
     titel_drops = 0
@@ -106,11 +128,9 @@ def api_pull(cfg: dict, tage: int) -> tuple[dict[str, dict], Counter, int]:
                     continue
                 if any(e in p["arbeitgeber"].lower() for e in excludes):
                     continue
-                if begriffe:
-                    titel = norm_text(f"{p['titel']} {p['beruf'] or ''}")
-                    if not any(b in titel for b in begriffe):
-                        titel_drops += 1
-                        continue
+                if not titel_ok(p, begriffe, negativ):
+                    titel_drops += 1
+                    continue
                 je_keyword[kw] += 1
                 postings.setdefault(p["refnr"], p)
     return postings, je_keyword, titel_drops
@@ -231,12 +251,24 @@ def cmd_fetch(args, cfg: dict, log: JsonLogger) -> None:
 
 
 def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
-    """Matching über den Bestand neu rechnen (Schwellwert-Tuning) — ohne API.
+    """Titel-Regeln + Matching über den Bestand neu anwenden (Tuning) — ohne API.
 
-    Nur status='neu' wird angepasst/gelöscht; alles Gesichtete bleibt unberührt.
+    Postings, die die aktuellen Titel-Regeln nicht mehr bestehen, werden gelöscht
+    (Matches via Cascade) — außer sie tragen bereits gesichtete Matches. Bei den
+    Matches wird nur status='neu' angepasst/gelöscht; Gesichtetes bleibt unberührt.
     """
     client = get_client()
-    postings = fetch_all(client, "job_postings", "id,refnr,arbeitgeber,plz,ort,raw")
+    postings = fetch_all(client, "job_postings", "id,refnr,titel,beruf,arbeitgeber,plz,ort,raw")
+
+    begriffe, negativ = titel_regeln(cfg)
+    bestand_alle = fetch_all(client, "job_matches", "id,posting_id,status")
+    geschuetzt = {b["posting_id"] for b in bestand_alle if b["status"] != "neu"}
+    muell_ids = {p["id"] for p in postings
+                 if p["id"] not in geschuetzt and not titel_ok(p, begriffe, negativ)}
+    for chunk in chunked(sorted(muell_ids), 100):
+        client.table("job_postings").delete().in_("id", chunk).execute()
+    postings = [p for p in postings if p["id"] not in muell_ids]
+
     firmen = load_companies(client)
     idx = CompanyIndex(firmen, plz_praefix_stellen=cfg["match"]["plz_praefix_stellen"])
     by_refnr, ohne_plz = match_postings(postings, idx, cfg)
@@ -271,9 +303,10 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
         client.table("job_matches").upsert(
             chunk, on_conflict="posting_id,company_id", ignore_duplicates=True).execute()
     n_ins = len(rows)
-    log.log("jobsignale_rematch", aktualisiert=n_upd, geloescht=n_del, neu=n_ins,
-            ohne_plz=ohne_plz)
-    print(f"Rematch: {n_ins} neu, {n_upd} aktualisiert, {n_del} gelöscht "
+    log.log("jobsignale_rematch", postings_geloescht=len(muell_ids), aktualisiert=n_upd,
+            geloescht=n_del, neu=n_ins, ohne_plz=ohne_plz)
+    print(f"Rematch: {len(muell_ids)} Postings nach Titel-Regeln entfernt; Matches: "
+          f"{n_ins} neu, {n_upd} aktualisiert, {n_del} gelöscht "
           f"(nur status='neu'; {len(bestand)} Bestand).")
 
 
