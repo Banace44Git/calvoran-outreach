@@ -68,7 +68,7 @@ def main() -> None:
             by_key[key] = (jahr, r.get("fetched_at", ""))
 
     companies = fetch_all(client, "id,name,plz")
-    matched = matched_count = 0
+    matched = matched_count = writes = 0
     for c in companies:
         key = f"{norm(c.get('name'))}|{(c.get('plz') or '').strip()}"
         upd: dict = {}
@@ -87,6 +87,14 @@ def main() -> None:
             matched_count += 1
         if upd:
             client.table("companies").update(upd).eq("id", c["id"]).execute()
+            writes += 1
+            # Supabase-Gateway kappt HTTP/2 nach ~10.000 Requests je Verbindung
+            # (RemoteProtocolError: ConnectionTerminated, last_stream_id 19999).
+            # Vor der Grenze eine frische Verbindung holen; get_client() erzeugt
+            # jeweils einen neuen Client (kein Caching). Vgl. Memory-Cap-Regel.
+            if writes % 5000 == 0:
+                client = get_client("calvoran")
+                log.log("client_reconnect", writes=writes)
 
     log.log("gf_alter_done", gf_zeilen=len(gf_rows), gf_firmen=len(by_key),
             companies=len(companies), gematcht=matched, anzahl_gf_gesetzt=matched_count)

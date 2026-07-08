@@ -297,7 +297,14 @@ def run(args):
     ids = resolve_ids(args)
     if ids:
         cands = select_by_ids(client, ids, args.limit)
-        log.log("c3_selected", n=len(cands), mode="ids", n_ids=len(ids), limit=args.limit)
+        # Resume: bereits dossierte Firmen überspringen, damit ein Neustart eines langen
+        # --ids-file-Laufs (z.B. Nachfolge-Crawl) die teuren Gemma-Dossiers nicht neu rechnet.
+        # --force erzwingt das Neu-Extrahieren (bewusster Re-Run).
+        if not args.force:
+            done = existing_dossier_ids(client)
+            cands = [x for x in cands if x["id"] not in done]
+        log.log("c3_selected", n=len(cands), mode="ids", n_ids=len(ids),
+                limit=args.limit, force=args.force)
     else:
         cands = select_companies(client, score=args.score, min_score=args.min_score,
                                  limit=args.limit, force=args.force)
@@ -362,6 +369,12 @@ def run(args):
         })
         audit.append(rec)
         done += 1
+        # Supabase-Gateway kappt HTTP/2 nach ~10.000 Requests je Verbindung; persist()
+        # macht 3 Writes/Firma (Dossier + Signals delete/insert). Alle 3.000 Firmen
+        # (~9.000 Requests) neu verbinden. get_client() liefert einen frischen Client.
+        if done % 3000 == 0:
+            client = get_client("calvoran")
+            log.log("client_reconnect", done=done)
         if done % 10 == 0 or done == len(cands):
             log.log("c3_progress", done=done, total=len(cands))
             print(f"  {done}/{len(cands)} extrahiert")

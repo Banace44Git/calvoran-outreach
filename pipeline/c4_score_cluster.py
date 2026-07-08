@@ -598,6 +598,12 @@ def run(args):
             "prioritaets_score": company.get("prioritaets_score"),
         })
         audit.append(rec)
+        if (idx + 1) % 5000 == 0:
+            # Supabase-Gateway kappt HTTP/2 nach ~10.000 Requests je Verbindung
+            # (ConnectionTerminated). Vor der Grenze frisch verbinden; get_client()
+            # liefert jeweils einen neuen Client (kein Caching).
+            client = get_client("calvoran")
+            log.log("client_reconnect", done=idx + 1)
         if (idx + 1) % 50 == 0:
             log.log("c4_progress", done=idx + 1, total=len(cand_ids))
             print(f"  {idx + 1}/{len(cand_ids)} gescort")

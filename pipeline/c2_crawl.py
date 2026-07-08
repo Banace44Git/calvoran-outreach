@@ -282,7 +282,17 @@ async def run(args):
     ids = resolve_ids(args)
     if ids:
         cands = select_by_ids(client, ids, args.limit)
-        log.log("c2_selected", n=len(cands), mode="ids", n_ids=len(ids), limit=args.limit)
+        # Resume: bereits gecrawlte Firmen (tech_signals gesetzt) überspringen, damit ein
+        # Neustart eines langen --ids-file-Laufs nicht alles neu crawlt. --force erzwingt Recrawl.
+        if not args.force:
+            crawled, cand_ids = set(), [x["id"] for x in cands]
+            for i in range(0, len(cand_ids), 200):
+                r = (client.table("companies").select("id")
+                     .in_("id", cand_ids[i:i + 200]).not_.is_("tech_signals", "null").execute())
+                crawled.update(x["id"] for x in r.data)
+            cands = [x for x in cands if x["id"] not in crawled]
+        log.log("c2_selected", n=len(cands), mode="ids", n_ids=len(ids),
+                limit=args.limit, force=args.force)
     else:
         cands = select_companies(client, score=args.score, min_score=args.min_score,
                                  limit=args.limit, force=args.force)
@@ -317,6 +327,11 @@ async def run(args):
                 "generator": tech.get("generator"),
             })
         done += len(batch)
+        # Supabase-Gateway kappt HTTP/2 nach ~10.000 Requests je Verbindung; persist()
+        # macht bis zu 2 Writes/Firma. Alle 4.000 Firmen (~8.000 Requests) neu verbinden.
+        if done // 4000 > (done - len(batch)) // 4000:
+            client = get_client("calvoran")
+            log.log("client_reconnect", done=done)
         log.log("c2_progress", done=done, total=len(cands))
         print(f"  {done}/{len(cands)} gecrawlt")
 
