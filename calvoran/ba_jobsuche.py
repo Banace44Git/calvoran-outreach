@@ -79,21 +79,26 @@ class BaJobsucheClient:
             return resp
         raise AssertionError("unreachable")
 
-    def search_page(self, was: str, *, veroeffentlichtseit: int, size: int, page: int,
+    def search_page(self, was: str, *, veroeffentlichtseit: int | None, size: int, page: int,
                     zeitarbeit: bool = False, pav: bool = False) -> dict:
-        """Eine Ergebnisseite. `page` beginnt bei 1."""
+        """Eine Ergebnisseite. `page` beginnt bei 1.
+
+        veroeffentlichtseit=None lässt den Parameter weg -> kompletter Aktiv-Bestand
+        (Voll-Sweep). Wichtig für Langläufer: >28 Tage alte, noch offene Anzeigen sind
+        über den Datumsfilter nicht erreichbar."""
         params = {
             "was": was,
-            "veroeffentlichtseit": snap_veroeffentlichtseit(int(veroeffentlichtseit)),
             "size": size,
             "page": page,
             "angebotsart": 1,                     # Arbeitsstellen (keine Ausbildung/Praktika)
             "zeitarbeit": str(zeitarbeit).lower(),
             "pav": str(pav).lower(),
         }
+        if veroeffentlichtseit is not None:
+            params["veroeffentlichtseit"] = snap_veroeffentlichtseit(int(veroeffentlichtseit))
         return self._get(SEARCH_PATH, params).json()
 
-    def search_all(self, was: str, *, veroeffentlichtseit: int, size: int = 100,
+    def search_all(self, was: str, *, veroeffentlichtseit: int | None, size: int = 100,
                    max_pages: int = 50, zeitarbeit: bool = False, pav: bool = False):
         """Generator über alle Anzeigen eines Keywords (paginiert bis leer/max_pages)."""
         for page in range(1, max_pages + 1):

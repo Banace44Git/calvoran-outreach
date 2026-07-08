@@ -11,8 +11,10 @@ keywords:                             # BA-Freitextsuche `was`, je Keyword ein S
   - "Kaufmännische Leitung"
   - "Kaufmännischer Leiter"           # BA-Titel sind oft maskulin ausgeschrieben
   - "CFO"
-  - "Assistenz der Geschäftsführung"  # »mit Perspektive« steht nur im Volltext -> Phase B
   # "Betriebsleiter" entfernt (Jo, 08.07.2026): überwiegend Gastro/Technik-Rauschen.
+  # "Assistenz der Geschäftsführung" entfernt (Jo, 08.07.2026): Assistenz* im Titel
+  # ist Müll — damit stirbt praktisch jeder Treffer dieses Keywords. Phase-B-Idee
+  # (»Assistenz der GF mit Perspektive« via Volltext-Detailabruf) bleibt denkbar.
 
 # Die BA-Freitextsuche `was` matcht den GANZEN Anzeigentext, nicht nur den Titel —
 # ohne Titel-Filter landen z.B. Verkäufer-Anzeigen im Ergebnis, weil »Geschäftsführer«
@@ -32,7 +34,6 @@ titel_filter:
   # kaufmännische Leitungen als »Betriebsleiter/in - kaufmännisch«). Exclude schlägt Positiv.
   exclude:
     - "schichtleit"              # Schichtleit*
-    - "assistenz der geschaftsleitung"
     - "managementassisten"       # Managementassisten*
     - "technischer leiter"
     - "technische leitung"
@@ -43,6 +44,15 @@ titel_filter:
     - "franchisepartner"
     - "zeitarbeit"               # Zeitarbeit*
     - "jurist"
+    - "vertrieb"                 # Vertrieb* (Jo, 08.07.2026)
+    - "sachbearbeiter"           # Sachbearbeiter*
+    - "assistenz"                # Assistenz* (deckt auch »Assistenz der Geschäftsleitung«)
+    - "assistent"                # Assistent (m/w/d) Geschäftsführer o.ä.
+  # Negativ gegen den BA-Hauptberuf (Jo, 08.07.2026) — hier ist die Taxonomie selbst
+  # das Signal: *ingenieur*/vertrieb* klassifizierte Stellen sind keine kaufm. Leitung.
+  exclude_beruf:
+    - "ingenieur"                # *ingenieur*
+    - "vertrieb"                 # vertrieb* (z.B. Vertriebs-Geschäftsführer/in)
 
 api:
   veroeffentlichtseit: 7              # Default für --since. Die v6-API akzeptiert NUR

@@ -5,8 +5,10 @@ zweite Führungsebene, ist das bei Inhabern 58+ ein Übergabe-Indikator. Die API
 kann nicht nach PLZ filtern -> bundesweiter Scan je Keyword (config/jobsignale.yaml),
 Match lokal gegen calvoran.companies (calvoran/matching.py, PLZ-Blocking).
 
-    .venv/bin/python pipeline/c6_jobsignale.py --backfill 28      # Erstlauf (API-Maximum)
-    .venv/bin/python pipeline/c6_jobsignale.py --since 7          # Wochenlauf
+    .venv/bin/python pipeline/c6_jobsignale.py --backfill         # Voll-Sweep: ALLE aktiven
+                                                                  # Anzeigen (auch Langläufer
+                                                                  # >28 Tage — stärkstes Signal)
+    .venv/bin/python pipeline/c6_jobsignale.py --since 7          # Wochenlauf (nur 1/7/14/28)
     .venv/bin/python pipeline/c6_jobsignale.py --since 7 --dry-run
     .venv/bin/python pipeline/c6_jobsignale.py --rematch          # Matching neu, ohne API
     .venv/bin/python pipeline/c6_jobsignale.py --reprio           # Prio aus aktuellem gf_alter
@@ -83,25 +85,30 @@ def welle1_ids() -> set[str]:
 
 
 def titel_regeln(cfg: dict):
-    """(positiv, negativ) — normalisierte Substring-Listen aus titel_filter."""
+    """(positiv, negativ_titel, negativ_beruf) — normalisierte Substring-Listen."""
     tf = cfg.get("titel_filter") or {}
     if not tf.get("aktiv"):
-        return [], []
+        return [], [], []
     return ([norm_text(b) for b in tf.get("begriffe", [])],
-            [norm_text(e) for e in tf.get("exclude", [])])
+            [norm_text(e) for e in tf.get("exclude", [])],
+            [norm_text(e) for e in tf.get("exclude_beruf", [])])
 
 
-def titel_ok(p: dict, begriffe: list[str], negativ: list[str]) -> bool:
+def titel_ok(p: dict, begriffe: list[str], negativ_titel: list[str],
+             negativ_beruf: list[str]) -> bool:
     """Positiv: Titel ODER BA-Hauptberuf nennt eine Führungsfunktion. Negativ (schlägt
-    Positiv): Datenmüll-Muster NUR im Stellentitel — nicht im Hauptberuf, dessen
-    BA-Taxonomie echte kaufm. Leitungen als »Betriebsleiter/in - kaufmännisch« führt."""
+    Positiv) mit getrennten Listen je Feld: Die Müll-Muster für den Stellentitel dürfen
+    nicht pauschal auf den Hauptberuf wirken (BA führt echte kaufm. Leitungen als
+    »Betriebsleiter/in - kaufmännisch«), aber die Taxonomie selbst filtert zuverlässig
+    Ingenieurs-/Vertriebsstellen aus."""
     titel = norm_text(p["titel"])
-    if negativ and any(e in titel for e in negativ):
+    if any(e in titel for e in negativ_titel):
         return False
-    if begriffe:
-        beides = norm_text(f"{p['titel']} {p['beruf'] or ''}")
-        if not any(b in beides for b in begriffe):
-            return False
+    beruf = norm_text(p.get("beruf") or "")
+    if beruf and any(e in beruf for e in negativ_beruf):
+        return False
+    if begriffe and not any(b in f"{titel} {beruf}" for b in begriffe):
+        return False
     return True
 
 
@@ -113,7 +120,7 @@ def api_pull(cfg: dict, tage: int) -> tuple[dict[str, dict], Counter, int]:
     """
     api = cfg["api"]
     excludes = [e.lower() for e in (cfg.get("exclude_arbeitgeber") or [])]
-    begriffe, negativ = titel_regeln(cfg)
+    begriffe, negativ_titel, negativ_beruf = titel_regeln(cfg)
     postings: dict[str, dict] = {}
     je_keyword: Counter = Counter()
     titel_drops = 0
@@ -128,7 +135,7 @@ def api_pull(cfg: dict, tage: int) -> tuple[dict[str, dict], Counter, int]:
                     continue
                 if any(e in p["arbeitgeber"].lower() for e in excludes):
                     continue
-                if not titel_ok(p, begriffe, negativ):
+                if not titel_ok(p, begriffe, negativ_titel, negativ_beruf):
                     titel_drops += 1
                     continue
                 je_keyword[kw] += 1
@@ -214,11 +221,15 @@ def insert_matches(client, by_refnr: dict, id_by_refnr: dict) -> int:
 
 
 def cmd_fetch(args, cfg: dict, log: JsonLogger) -> None:
-    gewuenscht = args.backfill if args.backfill else (args.since or cfg["api"]["veroeffentlichtseit"])
-    # v6 kennt nur 1/7/14/28 — ungültige Werte würden STILL ungefiltert liefern.
-    tage = snap_veroeffentlichtseit(int(gewuenscht))
-    print(f"BA-Scan: {len(cfg['keywords'])} Keywords, veroeffentlichtseit={tage} Tage "
-          f"(angefragt {gewuenscht}, API kennt nur 1/7/14/28) "
+    if args.backfill:
+        tage = None  # Voll-Sweep: Parameter weglassen -> kompletter Aktiv-Bestand
+        fenster = "Voll-Sweep (alle aktiven Anzeigen, inkl. Langläufer)"
+    else:
+        # v6 kennt nur 1/7/14/28 — ungültige Werte würden STILL ungefiltert liefern.
+        gewuenscht = args.since or cfg["api"]["veroeffentlichtseit"]
+        tage = snap_veroeffentlichtseit(int(gewuenscht))
+        fenster = f"veroeffentlichtseit={tage} Tage (angefragt {gewuenscht}, API kennt nur 1/7/14/28)"
+    print(f"BA-Scan: {len(cfg['keywords'])} Keywords, {fenster} "
           f"{'(DRY-RUN)' if args.dry_run else ''}")
     postings, je_keyword, titel_drops = api_pull(cfg, tage)
     print(f"Anzeigen (dedupliziert): {len(postings)}  "
@@ -260,11 +271,12 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
     client = get_client()
     postings = fetch_all(client, "job_postings", "id,refnr,titel,beruf,arbeitgeber,plz,ort,raw")
 
-    begriffe, negativ = titel_regeln(cfg)
+    begriffe, negativ_titel, negativ_beruf = titel_regeln(cfg)
     bestand_alle = fetch_all(client, "job_matches", "id,posting_id,status")
     geschuetzt = {b["posting_id"] for b in bestand_alle if b["status"] != "neu"}
     muell_ids = {p["id"] for p in postings
-                 if p["id"] not in geschuetzt and not titel_ok(p, begriffe, negativ)}
+                 if p["id"] not in geschuetzt
+                 and not titel_ok(p, begriffe, negativ_titel, negativ_beruf)}
     for chunk in chunked(sorted(muell_ids), 100):
         client.table("job_postings").delete().in_("id", chunk).execute()
     postings = [p for p in postings if p["id"] not in muell_ids]
@@ -388,8 +400,8 @@ def cmd_report(args, cfg: dict, log: JsonLogger) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--backfill", type=int, metavar="TAGE",
-                   help="Erstlauf; API-Maximum sind 28 Tage Rückschau")
+    g.add_argument("--backfill", action="store_true",
+                   help="Voll-Sweep über ALLE aktiven Anzeigen (inkl. Langläufer >28 Tage)")
     g.add_argument("--since", type=int, metavar="TAGE",
                    help="Lauf über die letzten N Tage (Default aus jobsignale.yaml)")
     g.add_argument("--rematch", action="store_true",

@@ -36,16 +36,17 @@ bundesAPI/jobsuche-api) — kein PLZ-Filter, daher bundesweiter Scan je Keyword 
 lokales Matching (Name+PLZ, `calvoran/matching.py`, rapidfuzz).
 
 ```bash
-.venv/bin/python pipeline/c6_jobsignale.py --backfill 28    # Erstlauf (API-Maximum 28 Tage!)
+.venv/bin/python pipeline/c6_jobsignale.py --backfill       # Voll-Sweep: alle aktiven Anzeigen
 .venv/bin/python pipeline/c6_jobsignale.py --since 7        # Wochenlauf, idempotent
-.venv/bin/python pipeline/c6_jobsignale.py --rematch        # Schwellwert-Tuning ohne API
+.venv/bin/python pipeline/c6_jobsignale.py --rematch        # Filter-/Schwellwert-Tuning ohne API
 .venv/bin/python pipeline/c6_jobsignale.py --reprio         # Prio nach GF-Alter-Anreicherung
 .venv/bin/python pipeline/c6_jobsignale.py --report         # KPI-Markdown nach OUTPUT_DIR
 ```
 
-Achtung API-Eigenheit: `veroeffentlichtseit` akzeptiert nur 1/7/14/28 — andere Werte
-ignoriert die API **still** und liefert den ungefilterten Gesamtbestand. Der Client
-(`calvoran/ba_jobsuche.py`) snappt deshalb aufwärts auf den nächsten gültigen Wert.
+Achtung API-Eigenheiten: `veroeffentlichtseit` akzeptiert nur 1/7/14/28 — andere Werte
+ignoriert die API **still** (= ungefiltert); der Client snappt aufwärts. Ohne den
+Parameter liefert die API ALLE aktiven Anzeigen — genau das nutzt `--backfill`, denn
+Langläufer (>28 Tage offen, Besetzungsschwierigkeit) sind sonst unsichtbar.
 
 Konfig: `config/jobsignale.yaml` (Keywords, Titel-Filter, Match-Schwellwerte).
 Sichtung: Dashboard-Tab »Job-Signale« (Status neu → gesichtet/relevant/irrelevant).
