@@ -16,3 +16,6 @@ pydantic>=2.0           # Dossier-Schemas (calvoran/schemas.py)
 streamlit>=1.58          # dashboard/kuratierung.py
 pandas>=2.0              # Tabellen-Backing fürs Dashboard
 phonenumbers>=8.13       # DIN-nahe Rufnummer-Formatierung im Nachverfolgungs-Tab
+
+# Job-Signal-Modul (c6): BA-Jobsuche -> Nachfolge-Signal
+rapidfuzz>=3.0           # unscharfer Firmennamen-Match (calvoran/matching.py)

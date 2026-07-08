@@ -1,0 +1,47 @@
+# Job-Signal-Modul (c6): BA-Jobsuche als Nachfolge-Signal.
+#
+# Leitidee (Jo): Sucht eine Zielfirma per Stellenanzeige einen GF, eine kaufmännische
+# Leitung oder eine zweite Führungsebene, deutet das bei Inhabern 58+ auf Übergabe-
+# vorbereitung oder gescheiterte interne Nachfolge — zeitkritisches, hochrelevantes
+# Outreach-Signal. Die API kann nicht nach PLZ/Bundesland filtern, deshalb wird je
+# Keyword bundesweit gescannt und lokal gegen calvoran.companies gematcht.
+
+keywords:                             # BA-Freitextsuche `was`, je Keyword ein Scan
+  - "Geschäftsführer"
+  - "Kaufmännische Leitung"
+  - "Kaufmännischer Leiter"           # BA-Titel sind oft maskulin ausgeschrieben
+  - "CFO"
+  - "Betriebsleiter"                  # Rauschkandidat (Gastro/Elektro) — nach Sichtungsmonat prüfen
+  - "Assistenz der Geschäftsführung"  # »mit Perspektive« steht nur im Volltext -> Phase B
+
+# Die BA-Freitextsuche `was` matcht den GANZEN Anzeigentext, nicht nur den Titel —
+# ohne Titel-Filter landen z.B. Verkäufer-Anzeigen im Ergebnis, weil »Geschäftsführer«
+# in der Firmenbeschreibung vorkommt. Begriffe sind normalisierte Substrings
+# (ASCII, lower) gegen Titel + Hauptberuf. Verworfene werden gezählt, nicht still gedroppt.
+titel_filter:
+  aktiv: true
+  begriffe:
+    - "geschaftsfuhr"            # Geschäftsführer/-in, -führung
+    - "geschaftsleit"            # Geschäftsleitung/-leiter
+    - "kaufmannische leit"       # Kaufmännische Leitung
+    - "kaufmannischer leit"      # Kaufmännischer Leiter
+    - "kaufm leit"
+    - "cfo"
+    - "betriebsleit"             # Betriebsleiter/-leitung
+
+api:
+  veroeffentlichtseit: 7              # Default für --since. Die v6-API akzeptiert NUR
+                                      # 1/7/14/28 Tage — andere Werte ignoriert sie still
+                                      # (= ungefiltert!); der Client snappt aufwärts.
+  size: 100                           # Treffer je Seite
+  max_pages_je_keyword: 50            # Notbremse: ~5.000 Anzeigen je Keyword
+  drossel_sekunden: 1.0               # konservativ, Rate-Limits der API unbekannt
+  zeitarbeit: false                   # API-Default ist true!
+  pav: false                          # private Arbeitsvermittler raus
+
+match:
+  fuzzy_auto: 90                      # >= dieser Score (gleiche PLZ) -> auto-Match 'fuzzy'
+  fuzzy_review: 75                    # 75-89 -> 'fuzzy_grenzfall' (Review-Queue)
+  plz_praefix_stellen: 3              # Regional-Stufe: PLZ-Präfix-Match 'region'
+
+exclude_arbeitgeber: []               # Personalberater, die trotz pav=false durchrutschen

@@ -589,7 +589,8 @@ def _fmt_teur(v):
     return f"{int(v):,}".replace(",", ".") if pd.notna(v) else "—"
 
 
-tab_tbl, tab_card, tab_funnel = st.tabs(["Tabelle", "Karteikarte", "Nachverfolgung"])
+tab_tbl, tab_card, tab_funnel, tab_jobs = st.tabs(
+    ["Tabelle", "Karteikarte", "Nachverfolgung", "Job-Signale"])
 
 # ============================= TABELLE ============================= #
 with tab_tbl:
@@ -1190,6 +1191,168 @@ with tab_funnel:
                 note = f" — {c['notes']}" if c.get("notes") else ""
                 st.markdown(f"- {_de_date(c.get('called_at'))} · "
                             f"**{OUTCOMES.get(c['outcome'], c['outcome'])}**{extra}{note}")
+
+# =========================== JOB-SIGNALE =========================== #
+# BA-Stellenanzeigen (c6_jobsignale.py) als Nachfolge-Indikator: Zielfirma sucht
+# GF / kaufmännische Leitung / zweite Ebene. Sichtung pflegt job_matches.status
+# (neu -> gesichtet/relevant/irrelevant); 'relevant' ist der Outreach-Vorrat für Phase B.
+
+JOB_STATI = ["neu", "gesichtet", "relevant", "irrelevant", "outreach"]
+_JS_PRIO_ORD = {"hoch": 0, "unbekannt": 1, "mittel": 2, "niedrig": 3}
+_JS_STUFE_ORD = {"exakt": 0, "fuzzy": 1, "region": 2, "fuzzy_grenzfall": 3}
+
+
+@st.cache_data(ttl=120, show_spinner="Lade Job-Signale …")
+def load_job_signale():
+    """job_matches ⨝ job_postings ⨝ companies — None, wenn Migration 0007 fehlt.
+
+    Firmen-Stammdaten on-demand nur für die gematchten company_ids (wie load_contacts),
+    nicht für alle ~70k Firmen."""
+    cl2 = get_client()
+    try:
+        matches = _fetch_all(cl2, "job_matches",
+                             "id,posting_id,company_id,match_stufe,match_score,"
+                             "prio,status,status_notiz")
+        postings = _fetch_all(cl2, "job_postings",
+                              "id,refnr,titel,beruf,arbeitgeber,plz,ort,keyword,"
+                              "veroeffentlicht_am,letzte_sichtung")
+    except Exception:                                          # noqa: BLE001
+        return None
+    p_by_id = {p["id"]: p for p in postings}
+    firma: dict = {}
+    cids = sorted({m["company_id"] for m in matches})
+    for i in range(0, len(cids), 50):
+        for c in (cl2.table("companies").select("id,name,plz,gf_alter")
+                  .in_("id", cids[i:i + 50]).execute().data):
+            firma[c["id"]] = c
+    return matches, p_by_id, firma
+
+
+@st.cache_data(ttl=600)
+def load_welle1_ids() -> set:
+    """Alle jemals kuratierten company_ids (Kontext-Flag, wellenübergreifend)."""
+    try:
+        return {json.loads(ln)["company_id"]
+                for ln in SELECTION_FILE.read_text(encoding="utf-8").splitlines()
+                if ln.strip()}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+with tab_jobs:
+    _js_data = load_job_signale()
+    if _js_data is None:
+        st.warning("Job-Signale inaktiv — Migration 0007 (job_postings/job_matches) noch "
+                   "nicht im Supabase-Studio angewandt.")
+    else:
+        js_matches, js_postings, js_firma = _js_data
+        if not js_matches:
+            st.info("Noch keine Matches — einmalig "
+                    "`pipeline/c6_jobsignale.py --backfill 100` laufen lassen.")
+        else:
+            w1 = load_welle1_ids()
+            n_neu = sum(1 for m in js_matches if m["status"] == "neu")
+            n_grenz = sum(1 for m in js_matches
+                          if m["status"] == "neu" and m["match_stufe"] == "fuzzy_grenzfall")
+            n_rel = sum(1 for m in js_matches if m["status"] == "relevant")
+            jm = st.columns(5)
+            jm[0].metric("Anzeigen im Bestand", len(js_postings))
+            jm[1].metric("Matches", len(js_matches))
+            jm[2].metric("neu (Review-Queue)", n_neu)
+            jm[3].metric("davon Grenzfälle", n_grenz)
+            jm[4].metric("relevant (Vorrat)", n_rel)
+
+            jf = st.columns([2, 2, 2])
+            js_status_sel = jf[0].multiselect("Status", JOB_STATI, default=["neu"],
+                                              key="js_status")
+            js_prio_sel = jf[1].multiselect("Priorität", list(_JS_PRIO_ORD),
+                                            default=list(_JS_PRIO_ORD), key="js_prio")
+            js_suche = jf[2].text_input("Suche (Firma/Arbeitgeber/Titel)", key="js_suche")
+
+            def _js_sort(m):
+                return (JOB_STATI.index(m["status"]), _JS_PRIO_ORD[m["prio"]],
+                        _JS_STUFE_ORD[m["match_stufe"]], -(m["match_score"] or 0))
+
+            js_rows, js_orig = [], {}
+            for m in sorted(js_matches, key=_js_sort):
+                if m["status"] not in js_status_sel or m["prio"] not in js_prio_sel:
+                    continue
+                p = js_postings.get(m["posting_id"]) or {}
+                c = js_firma.get(m["company_id"]) or {}
+                if js_suche.strip():
+                    q = js_suche.strip().lower()
+                    haystack = f"{c.get('name', '')} {p.get('arbeitgeber', '')} {p.get('titel', '')}".lower()
+                    if q not in haystack:
+                        continue
+                js_orig[m["id"]] = m
+                js_rows.append({
+                    "_id": m["id"],
+                    "Status": m["status"],
+                    "Notiz": m.get("status_notiz") or "",
+                    "Prio": m["prio"],
+                    "GF-Alter": c.get("gf_alter"),
+                    "Firma": c.get("name"),
+                    "Firmen-PLZ": c.get("plz"),
+                    "BA-Arbeitgeber": p.get("arbeitgeber"),
+                    "Stellentitel": p.get("titel"),
+                    "BA-Beruf": p.get("beruf"),
+                    "Anzeigen-Ort": f"{p.get('plz') or ''} {p.get('ort') or ''}".strip(),
+                    "veröffentlicht": _de_date(p.get("veroeffentlicht_am")),
+                    "zuletzt gesehen": _de_date(p.get("letzte_sichtung")),
+                    "Stufe": m["match_stufe"],
+                    "Score": m["match_score"],
+                    "Welle 1": m["company_id"] in w1,
+                    "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
+                })
+            if not js_rows:
+                st.info("Kein Match im Filter.")
+            else:
+                st.caption("Status/Notiz direkt in der Tabelle setzen, dann speichern. "
+                           "Grenzfälle: BA-Arbeitgeber gegen Firma prüfen (Anzeige öffnen).")
+                js_df = pd.DataFrame(js_rows).set_index("_id")
+                js_edited = st.data_editor(
+                    js_df, hide_index=True, width="stretch",
+                    height=min(520, 60 + 35 * len(js_rows)),
+                    key="js_editor",
+                    disabled=[col for col in js_df.columns if col not in ("Status", "Notiz")],
+                    column_config={
+                        "Status": st.column_config.SelectboxColumn(
+                            "Status", options=JOB_STATI, required=True, width="small"),
+                        "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
+                        "Prio": st.column_config.TextColumn("Prio", width="small"),
+                        "GF-Alter": st.column_config.NumberColumn("GF-Alter", width="small"),
+                        "Score": st.column_config.NumberColumn(
+                            "Score", format="%.0f", width="small"),
+                        "Welle 1": st.column_config.CheckboxColumn(
+                            "W1", help="war in der Welle-1-Kuratierung", width="small"),
+                        "Anzeige": st.column_config.LinkColumn(
+                            "Anzeige", display_text="öffnen", width="small"),
+                    })
+                if st.button("Änderungen speichern", type="primary", key="js_save"):
+                    cl_js = get_client()
+                    n_upd = 0
+                    try:
+                        for mid in js_edited.index:
+                            neu_status = js_edited.at[mid, "Status"]
+                            neu_notiz = (js_edited.at[mid, "Notiz"] or "").strip()
+                            orig = js_orig[mid]
+                            if (neu_status != orig["status"]
+                                    or neu_notiz != (orig.get("status_notiz") or "")):
+                                upd = {"status": neu_status,
+                                       "status_notiz": neu_notiz or None}
+                                if neu_status != "neu":
+                                    upd["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                                (cl_js.table("job_matches").update(upd)
+                                 .eq("id", mid).execute())
+                                n_upd += 1
+                        if n_upd:
+                            load_job_signale.clear()
+                            st.toast(f"{n_upd} Matches aktualisiert.")
+                            st.rerun()
+                        else:
+                            st.toast("Keine Änderungen.")
+                    except Exception as e:                     # noqa: BLE001
+                        st.error(f"Speichern fehlgeschlagen: {e}")
 
 st.caption(
     f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true (decision==lead) je Welle.  "
