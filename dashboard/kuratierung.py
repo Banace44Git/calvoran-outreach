@@ -498,37 +498,86 @@ plz_fmt = lambda p: f"{p} · {REGION_LABELS.get(p, '')}".strip(" ·")
 umax = int(df["umsatz_teur"].dropna().max()) if df["umsatz_teur"].notna().any() else 0
 bmax = int(df["bilanz_teur"].dropna().max()) if df["bilanz_teur"].notna().any() else 0
 
+# Filter-Widgets laufen über Session-State-Keys (statt default=-Parameter), damit der
+# »Alle Filter entfernen«-Button sie per on_click-Callback zurücksetzen kann — ein
+# Widget-Key darf nach Instanziierung nicht gesetzt werden, Callbacks laufen aber davor.
+_FILTER_START = {
+    "flt_klassen": ["A", "B"],
+    "flt_bwl": ["fern", "mittel"],
+    "flt_cluster": cluster_opts,
+    "flt_plz": plz_opts,
+    "flt_alter": 58,
+    "flt_umsatz": (0, umax),
+    "flt_bilanz": (0, bmax),
+    "flt_berater": True,
+    "flt_nfger": False,
+    "flt_alterunbek": False,
+    "flt_groesseunbek": True,
+    "flt_nurleads": False,
+    "flt_bearb": "alle",
+}
+for _k, _v in _FILTER_START.items():
+    st.session_state.setdefault(_k, _v)
+
+
+def _filter_entfernen():
+    """Neutralstellung: alles sichtbar (inkl. KO), nur der Suchtext bleibt stehen."""
+    st.session_state.update({
+        "flt_klassen": ["A", "B", "C", "KO"],
+        "flt_bwl": ["fern", "mittel", "nah"],
+        "flt_cluster": cluster_opts,
+        "flt_plz": plz_opts,
+        "flt_alter": 40,
+        "flt_umsatz": (0, umax),
+        "flt_bilanz": (0, bmax),
+        "flt_berater": False,
+        "flt_nfger": True,
+        "flt_alterunbek": True,
+        "flt_groesseunbek": True,
+        "flt_nurleads": False,
+        "flt_bearb": "alle",
+    })
+
+
 with st.expander("Filter / Suchkriterien", expanded=True):
     r1 = st.columns(4)
-    klassen = r1[0].multiselect("Score-Klasse", ["A", "B", "C"], default=["A", "B"])
-    bwl_sel = r1[1].multiselect("BWL-Affinität", ["fern", "mittel", "nah"], default=["fern", "mittel"],
+    klassen = r1[0].multiselect("Score-Klasse", ["A", "B", "C", "KO"], key="flt_klassen")
+    bwl_sel = r1[1].multiselect("BWL-Affinität", ["fern", "mittel", "nah"], key="flt_bwl",
                                 help="fern = Idealkunde (technischer Inhaber, kaufm. Lücke). nah = depriorisieren.")
-    cluster_sel = r1[2].multiselect("Makrocluster", cluster_opts, default=cluster_opts)
-    plz_sel = r1[3].multiselect("Region (PLZ)", plz_opts, default=plz_opts, format_func=plz_fmt)
+    cluster_sel = r1[2].multiselect("Makrocluster", cluster_opts, key="flt_cluster")
+    plz_sel = r1[3].multiselect("Region (PLZ)", plz_opts, key="flt_plz", format_func=plz_fmt)
 
     r2 = st.columns(4)
-    alter_min = r2[0].slider("GF-Alter ab", 40, 80, 58, 1)
-    umsatz_rng = r2[1].slider("Umsatz T€", 0, umax, (0, umax), step=max(1, umax // 100)) if umax else (0, 0)
-    bilanz_rng = r2[2].slider("Bilanz T€", 0, bmax, (0, bmax), step=max(1, bmax // 100)) if bmax else (0, 0)
+    alter_min = r2[0].slider("GF-Alter ab", 40, 80, step=1, key="flt_alter")
+    umsatz_rng = r2[1].slider("Umsatz T€", 0, umax, step=max(1, umax // 100),
+                              key="flt_umsatz") if umax else (0, 0)
+    bilanz_rng = r2[2].slider("Bilanz T€", 0, bmax, step=max(1, bmax // 100),
+                              key="flt_bilanz") if bmax else (0, 0)
     with r2[3]:
-        ohne_berater = st.checkbox("Berater-Branchen ausschließen", value=True,
+        ohne_berater = st.checkbox("Berater-Branchen ausschließen", key="flt_berater",
                                    help="WZ 69/70/73/74/78 — Berater lassen ungern andere Berater ins Haus.")
-        nf_geregelt_zeigen = st.checkbox("auch geregelte Nachfolge anzeigen", value=False,
+        nf_geregelt_zeigen = st.checkbox("auch geregelte Nachfolge anzeigen", key="flt_nfger",
                                          help="Standard: vollzogener/geregelter Generationswechsel ist K.o. "
                                               "(kein Verkaufsanlass) und ausgeblendet. Anhaken blendet diese Firmen "
                                               "— jetzt Klasse KO — wieder ein. Hart: zwei GF gleichen Nachnamens, "
                                               "einer <50. Weich: nächste Generation steht laut Website bereit.")
-        alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", value=False)
-        groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", value=True)
-        nur_leads = st.checkbox("nur als Lead markierte", value=False,
+        alter_unbekannt = st.checkbox("GF-Alter unbekannt einschließen", key="flt_alterunbek")
+        groesse_unbekannt = st.checkbox("ohne Umsatz/Bilanz einschließen", key="flt_groesseunbek")
+        nur_leads = st.checkbox("nur als Lead markierte", key="flt_nurleads",
                                 help="Zeigt ausschließlich Firmen mit Entscheidung „Lead\" "
                                      "(selected==true in selection.jsonl).")
 
-    r3 = st.columns([1, 3])
+    r3 = st.columns([1, 2.6, 0.9])
     bearbeitung = r3[0].selectbox(
-        "Bearbeitungsstatus", ["alle", "offen", "bearbeitet"],
+        "Bearbeitungsstatus", ["alle", "offen", "bearbeitet"], key="flt_bearb",
         help="offen = noch nicht entschieden · bearbeitet = als Lead oder uninteressant markiert")
     suche = r3[1].text_input("Volltextsuche (Name/Ort)", "")
+    with r3[2]:
+        st.markdown("<div style='padding-top:1.8rem'></div>", unsafe_allow_html=True)
+        st.button("Alle Filter entfernen", on_click=_filter_entfernen,
+                  help="Setzt alle Filter auf »alles anzeigen« (inkl. Klasse KO, GF-Alter "
+                       "unbekannt, Berater). Der Suchtext bleibt erhalten — so findest du "
+                       "jede Firma im Gesamtbestand.")
 
 # --- Filter anwenden ---
 f = df.copy()
@@ -1262,12 +1311,21 @@ with tab_jobs:
             jm[3].metric("davon Grenzfälle", n_grenz)
             jm[4].metric("relevant (Vorrat)", n_rel)
 
-            jf = st.columns([2, 2, 2])
-            js_status_sel = jf[0].multiselect("Status", JOB_STATI, default=["neu"],
-                                              key="js_status")
-            js_prio_sel = jf[1].multiselect("Priorität", list(_JS_PRIO_ORD),
-                                            default=list(_JS_PRIO_ORD), key="js_prio")
+            st.session_state.setdefault("js_status", ["neu"])
+            st.session_state.setdefault("js_prio", list(_JS_PRIO_ORD))
+
+            def _js_filter_entfernen():
+                st.session_state.update({"js_status": JOB_STATI,
+                                         "js_prio": list(_JS_PRIO_ORD)})
+
+            jf = st.columns([2, 2, 1.6, 0.8])
+            js_status_sel = jf[0].multiselect("Status", JOB_STATI, key="js_status")
+            js_prio_sel = jf[1].multiselect("Priorität", list(_JS_PRIO_ORD), key="js_prio")
             js_suche = jf[2].text_input("Suche (Firma/Arbeitgeber/Titel)", key="js_suche")
+            with jf[3]:
+                st.markdown("<div style='padding-top:1.8rem'></div>", unsafe_allow_html=True)
+                st.button("Filter entfernen", key="js_reset", on_click=_js_filter_entfernen,
+                          help="Alle Status/Prioritäten anzeigen — Suchtext bleibt erhalten.")
 
             def _js_sort(m):
                 return (JOB_STATI.index(m["status"]), _JS_PRIO_ORD[m["prio"]],
