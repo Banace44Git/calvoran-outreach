@@ -18,7 +18,7 @@ from calvoran.db import get_client
 def fetch_all(client, cols: str) -> list[dict]:
     out, step, start = [], 1000, 0
     while True:
-        r = client.table("companies").select(cols).range(start, start + step - 1).execute()
+        r = client.table("companies").select(cols).order("id").range(start, start + step - 1).execute()
         out += r.data
         if len(r.data) < step:
             break

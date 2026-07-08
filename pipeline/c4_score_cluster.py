@@ -325,7 +325,7 @@ def _ko_reason(bd) -> str:
 def _paginate_ids(client, table, col):
     ids, step, start = set(), 1000, 0
     while True:
-        r = client.table(table).select(col).range(start, start + step - 1).execute()
+        r = client.table(table).select(col).order("id").range(start, start + step - 1).execute()
         ids.update(x[col] for x in r.data)
         if len(r.data) < step:
             break
@@ -345,7 +345,7 @@ def load_dossiers(client, only_ids=None) -> dict:
         return out
     step, start = 1000, 0
     while True:
-        r = client.table("dossiers").select("company_id,dossier").range(start, start + step - 1).execute()
+        r = client.table("dossiers").select("company_id,dossier").order("id").range(start, start + step - 1).execute()
         for d in r.data:
             out[d["company_id"]] = d["dossier"]
         if len(r.data) < step:

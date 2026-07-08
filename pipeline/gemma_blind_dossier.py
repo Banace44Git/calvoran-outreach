@@ -58,7 +58,7 @@ def branche(cluster_key) -> str:
 def fetch_all(client, tbl, cols):
     out, step, start = [], 1000, 0
     while True:
-        r = client.table(tbl).select(cols).range(start, start + step - 1).execute()
+        r = client.table(tbl).select(cols).order("id").range(start, start + step - 1).execute()
         out.extend(r.data)
         if len(r.data) < step:
             break

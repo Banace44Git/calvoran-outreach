@@ -53,7 +53,7 @@ def select_companies(client, *, score, min_score, limit, force):
              .eq("excluded", False))
         if not force:
             q = q.is_("tech_signals", "null")
-        r = q.range(start, start + step - 1).execute()
+        r = q.order("id").range(start, start + step - 1).execute()
         out.extend(r.data)
         if len(r.data) < step:
             break

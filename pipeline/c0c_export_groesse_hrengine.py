@@ -31,7 +31,7 @@ def load_groesse(client) -> dict:
     while True:
         r = (client.table("companies")
              .select("name,plz,umsatz_eur,bilanzsumme_eur")
-             .range(start, start + step - 1).execute())
+             .order("id").range(start, start + step - 1).execute())
         for c in r.data:
             groesse = c.get("umsatz_eur")
             if groesse is None:

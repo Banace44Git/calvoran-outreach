@@ -194,10 +194,15 @@ REGION_LABELS = {
 # --------------------------------------------------------------------------- #
 # Datenlade-Layer (gecached)
 # --------------------------------------------------------------------------- #
-def _fetch_all(client, tbl, cols):
+def _fetch_all(client, tbl, cols, order="id"):
+    """Paginierter Voll-Abruf MIT stabiler Sortierung. Ohne ORDER BY ist die Seiten-
+    Reihenfolge in Postgres nicht garantiert — laufen parallel Updates (z.B. die externe
+    GF-Anreicherung auf companies), wandern Zeilen im Heap und ganze Teilmengen fehlen
+    still (beobachtet 2026-07-08: 45.317 von 70.511 companies)."""
     out, step, start = [], 1000, 0
     while True:
-        r = client.table(tbl).select(cols).range(start, start + step - 1).execute()
+        r = (client.table(tbl).select(cols).order(order)
+             .range(start, start + step - 1).execute())
         out.extend(r.data)
         if len(r.data) < step:
             break

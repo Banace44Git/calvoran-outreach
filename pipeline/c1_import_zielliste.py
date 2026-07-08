@@ -109,7 +109,7 @@ def holding_flag(rec: dict) -> tuple[bool, str | None]:
 def fetch_all(client, columns: str) -> list[dict]:
     out, step, start = [], 1000, 0
     while True:
-        r = client.table("companies").select(columns).range(start, start + step - 1).execute()
+        r = client.table("companies").select(columns).order("id").range(start, start + step - 1).execute()
         out.extend(r.data)
         if len(r.data) < step:
             break

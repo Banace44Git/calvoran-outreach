@@ -55,7 +55,7 @@ def task_for(score, override) -> str:
 def existing_dossier_ids(client) -> set:
     ids, step, start = set(), 1000, 0
     while True:
-        r = client.table("dossiers").select("company_id").range(start, start + step - 1).execute()
+        r = client.table("dossiers").select("company_id").order("id").range(start, start + step - 1).execute()
         ids.update(x["company_id"] for x in r.data)
         if len(r.data) < step:
             break
@@ -98,7 +98,7 @@ def select_companies(client, *, score, min_score, limit, force):
              .eq("holding_flag", False)
              .is_("dup_of", "null")
              .eq("excluded", False))
-        r = q.range(start, start + step - 1).execute()
+        r = q.order("id").range(start, start + step - 1).execute()
         out.extend(r.data)
         if len(r.data) < step:
             break
