@@ -643,8 +643,8 @@ def _fmt_teur(v):
     return f"{int(v):,}".replace(",", ".") if pd.notna(v) else "—"
 
 
-tab_tbl, tab_card, tab_funnel, tab_jobs = st.tabs(
-    ["Tabelle", "Karteikarte", "Nachverfolgung", "Job-Signale"])
+tab_tbl, tab_card, tab_funnel, tab_jobs, tab_jobs_temp = st.tabs(
+    ["Tabelle", "Karteikarte", "Nachverfolgung", "Job-Signale", "Job-Signale TEMP"])
 
 # ============================= TABELLE ============================= #
 with tab_tbl:
@@ -1417,6 +1417,63 @@ with tab_jobs:
                             st.toast("Keine Änderungen.")
                     except Exception as e:                     # noqa: BLE001
                         st.error(f"Speichern fehlgeschlagen: {e}")
+
+# ======================== JOB-SIGNALE TEMP ======================== #
+# Temporäre Ansicht (Jo, 09.07.2026): aktive Führungs-Anzeigen OHNE Match zur
+# Zielliste — potenzielle NEUE Leads (Signal zuerst, Qualifizierung danach).
+# Read-only: die Anzeigen haben keine job_matches-Zeile, es gibt nichts zu pflegen.
+
+with tab_jobs_temp:
+    st.caption("Aktive Führungs-Anzeigen **ohne** Zielliste-Match — Kandidaten für eine "
+               "Ziellisten-Erweiterung. Älteste zuerst (Langläufer = Besetzungsschwierigkeit).")
+    _jt = load_job_signale()
+    if _jt is None:
+        st.warning("Job-Signale inaktiv — Migration 0007 (job_postings/job_matches) noch "
+                   "nicht im Supabase-Studio angewandt.")
+    else:
+        jt_matches, jt_postings, _jt_firma = _jt
+        gematcht = {m["posting_id"] for m in jt_matches}
+        offen = [p for p in jt_postings.values() if p["id"] not in gematcht]
+
+        jtf = st.columns([2, 2])
+        jt_suche = jtf[0].text_input("Suche (Arbeitgeber/Titel/Ort)", key="jt_suche")
+        jt_kws = sorted({p.get("keyword") or "?" for p in offen})
+        jt_kw_sel = jtf[1].multiselect("Keyword", jt_kws, default=jt_kws, key="jt_kw")
+
+        jt_rows = []
+        for p in sorted(offen, key=lambda p: p.get("veroeffentlicht_am") or "9999"):
+            if (p.get("keyword") or "?") not in jt_kw_sel:
+                continue
+            if jt_suche.strip():
+                hay = " ".join(str(v or "") for v in (
+                    p.get("arbeitgeber"), p.get("titel"), p.get("beruf"),
+                    p.get("ort"), p.get("plz"))).lower()
+                if not all(w in hay for w in jt_suche.lower().split()):
+                    continue
+            jt_rows.append({
+                "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
+                "Arbeitgeber": p.get("arbeitgeber"),
+                "Stellentitel": p.get("titel"),
+                "BA-Beruf": p.get("beruf"),
+                "Ort": f"{p.get('plz') or ''} {p.get('ort') or ''}".strip(),
+                "veröffentlicht": _de_date(p.get("veroeffentlicht_am")),
+                "zuletzt gesehen": _de_date(p.get("letzte_sichtung")),
+                "Keyword": p.get("keyword"),
+            })
+        st.caption(f"{len(jt_rows)} Anzeigen ohne Zielliste-Match "
+                   f"(von {len(offen)} offenen, {len(jt_postings)} gesamt).")
+        if jt_rows:
+            st.dataframe(
+                pd.DataFrame(jt_rows), hide_index=True, width="stretch",
+                height=min(560, 60 + 35 * len(jt_rows)),
+                column_config={
+                    "Anzeige": st.column_config.LinkColumn(
+                        "Anzeige", display_text="Link", width="small"),
+                    "Arbeitgeber": st.column_config.TextColumn("Arbeitgeber", width="medium"),
+                    "Stellentitel": st.column_config.TextColumn("Stellentitel", width="medium"),
+                })
+        else:
+            st.info("Kein Treffer im Filter.")
 
 st.caption(
     f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true (decision==lead) je Welle.  "
