@@ -9,6 +9,12 @@ Stufen (Präzision vor Recall, kein Nur-Name-Match bundesweit bei 70k Firmen):
   fuzzy            token_set_ratio >= fuzzy_auto, gleiche PLZ
   fuzzy_grenzfall  fuzzy_review <= Score < fuzzy_auto, gleiche PLZ (Review-Queue)
   region           PLZ-Präfix gleich (Betriebsstätte != HR-Sitz), Name exakt oder >= 95
+
+Teilmengen-Regel: Sind die Namens-Tokens des einen eine ECHTE Teilmenge des anderen
+(»e on« vs »e on one«), gibt token_set_ratio 100 — bei Konzernen matcht so eine
+einzige Mutter-Anzeige jede Tochter. Teilmengen sind deshalb nie Auto-Match:
+gleiche PLZ -> fuzzy_grenzfall (Review, z.B. Baldus Medical vs Baldus Medical
+Engineering), Region-Stufe -> gar kein Match (E.ON SE vs E.ON One GmbH).
 """
 
 from __future__ import annotations
@@ -42,6 +48,12 @@ def norm_firma(s: str | None) -> str:
     for phrase in _LEGAL_PHRASES:
         s = s.replace(f" {phrase} ", " ")
     return s.strip()
+
+
+def _token_teilmenge(a: str, b: str) -> bool:
+    """True, wenn die Tokens des einen eine echte Teilmenge des anderen sind."""
+    ta, tb = set(a.split()), set(b.split())
+    return ta != tb and (ta <= tb or tb <= ta)
 
 
 def prio_from_alter(gf_alter) -> str:
@@ -101,9 +113,11 @@ class CompanyIndex:
                     consider(cid, "exakt", 100.0, alter)
                     continue
                 score = fuzz.token_set_ratio(n_ag, n)
-                if score >= fuzzy_auto:
+                if score < fuzzy_review:
+                    continue
+                if score >= fuzzy_auto and not _token_teilmenge(n_ag, n):
                     consider(cid, "fuzzy", score, alter)
-                elif score >= fuzzy_review:
+                else:
                     consider(cid, "fuzzy_grenzfall", score, alter)
             praefix = plz[: self.praefix]
             if praefix in gesehen_praefix:
@@ -116,6 +130,6 @@ class CompanyIndex:
                     consider(cid, "region", 100.0, alter)
                 else:
                     score = fuzz.token_set_ratio(n_ag, n)
-                    if score >= _REGION_MIN_SCORE:
+                    if score >= _REGION_MIN_SCORE and not _token_teilmenge(n_ag, n):
                         consider(cid, "region", score, alter)
         return list(best.values())
