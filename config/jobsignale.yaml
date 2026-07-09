@@ -69,4 +69,5 @@ match:
   fuzzy_review: 75                    # 75-89 -> 'fuzzy_grenzfall' (Review-Queue)
   plz_praefix_stellen: 3              # Regional-Stufe: PLZ-Präfix-Match 'region'
 
-exclude_arbeitgeber: []               # Personalberater, die trotz pav=false durchrutschen
+exclude_arbeitgeber:                  # Substring (case-insensitiv) gegen den Arbeitgebernamen
+  - "EY Consulting"                   # Big-4-Eigenanzeigen, keine Mandanten (Jo, 09.07.2026)

@@ -1326,7 +1326,7 @@ with tab_jobs:
             jf = st.columns([2, 2, 1.6, 0.8])
             js_status_sel = jf[0].multiselect("Status", JOB_STATI, key="js_status")
             js_prio_sel = jf[1].multiselect("Priorität", list(_JS_PRIO_ORD), key="js_prio")
-            js_suche = jf[2].text_input("Suche (Firma/Arbeitgeber/Titel)", key="js_suche")
+            js_suche = jf[2].text_input("Suche (Firma/Arbeitgeber/Titel/Ort)", key="js_suche")
             with jf[3]:
                 st.markdown("<div style='padding-top:1.8rem'></div>", unsafe_allow_html=True)
                 st.button("Filter entfernen", key="js_reset", on_click=_js_filter_entfernen,
@@ -1343,9 +1343,12 @@ with tab_jobs:
                 p = js_postings.get(m["posting_id"]) or {}
                 c = js_firma.get(m["company_id"]) or {}
                 if js_suche.strip():
-                    q = js_suche.strip().lower()
-                    haystack = f"{c.get('name', '')} {p.get('arbeitgeber', '')} {p.get('titel', '')}".lower()
-                    if q not in haystack:
+                    # Jedes Suchwort muss irgendwo treffen — »IGK Meschede« findet so die
+                    # Firma über Name UND Ort, obwohl beides in verschiedenen Feldern steht.
+                    haystack = " ".join(str(v or "") for v in (
+                        c.get("name"), p.get("arbeitgeber"), p.get("titel"),
+                        p.get("ort"), c.get("plz"), p.get("plz"))).lower()
+                    if not all(w in haystack for w in js_suche.lower().split()):
                         continue
                 js_orig[m["id"]] = m
                 js_rows.append({
