@@ -272,8 +272,11 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
     postings = fetch_all(client, "job_postings", "id,refnr,titel,beruf,arbeitgeber,plz,ort,raw")
 
     begriffe, negativ_titel, negativ_beruf = titel_regeln(cfg)
-    bestand_alle = fetch_all(client, "job_matches", "id,posting_id,status")
-    geschuetzt = {b["posting_id"] for b in bestand_alle if b["status"] != "neu"}
+    bestand_alle = fetch_all(client, "job_matches", "id,posting_id,company_id,status")
+    # Geschützt: gesichtete Matches UND externe Signal-Leads (company_id NULL,
+    # Migration 0008) — die entstehen manuell im TEMP-Tab, nie aus dem Matching.
+    geschuetzt = {b["posting_id"] for b in bestand_alle
+                  if b["status"] != "neu" or b["company_id"] is None}
     muell_ids = {p["id"] for p in postings
                  if p["id"] not in geschuetzt
                  and not titel_ok(p, begriffe, negativ_titel, negativ_beruf)}
@@ -294,6 +297,8 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
                         "id,posting_id,company_id,match_stufe,match_score,status")
     n_upd = n_del = n_ins = 0
     for b in bestand:
+        if b["company_id"] is None:
+            continue  # externe Signal-Leads (TEMP-Tab) nie anfassen
         key = (b["posting_id"], b["company_id"])
         frisch = neu.pop(key, None)
         if b["status"] != "neu":
@@ -359,7 +364,7 @@ def cmd_report(args, cfg: dict, log: JsonLogger) -> None:
     relevante = [m for m in matches if m["status"] in ("relevant", "outreach")]
     briefe = gespraeche = 0
     if relevante:
-        cids = list({m["company_id"] for m in relevante})
+        cids = list({m["company_id"] for m in relevante if m["company_id"]})
         for chunk in chunked(cids, 150):
             r = (client.table("outreach").select("company_id")
                  .in_("company_id", chunk).eq("channel", "letter").execute())
@@ -387,8 +392,9 @@ def cmd_report(args, cfg: dict, log: JsonLogger) -> None:
                     key=lambda m: _PRIO_SORT[m["prio"]])
     for m in offene[:40]:
         p = p_by_id.get(m["posting_id"], {})
-        c = firmen_by_id.get(m["company_id"], {})
-        md.append(f"- **{c.get('name')}** (gf_alter {c.get('gf_alter') or '—'}, prio {m['prio']}) "
+        c = firmen_by_id.get(m["company_id"]) or {}
+        name = c.get("name") or f"{p.get('arbeitgeber')} (extern, nicht in Zielliste)"
+        md.append(f"- **{name}** (gf_alter {c.get('gf_alter') or '—'}, prio {m['prio']}) "
                   f"— »{p.get('titel')}« | {ANZEIGE_URL.format(refnr=p.get('refnr'))}")
 
     out = Path(OUTPUT_DIR) / f"jobsignale-report-{heute}.md"

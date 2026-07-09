@@ -1274,7 +1274,8 @@ def load_job_signale():
         return None
     p_by_id = {p["id"]: p for p in postings}
     firma: dict = {}
-    cids = sorted({m["company_id"] for m in matches})
+    # company_id None = externer Signal-Lead (TEMP-Tab, Migration 0008) — kein Lookup.
+    cids = sorted({m["company_id"] for m in matches if m["company_id"]})
     for i in range(0, len(cids), 50):
         for c in (cl2.table("companies").select("id,name,plz,gf_alter")
                   .in_("id", cids[i:i + 50]).execute().data):
@@ -1357,8 +1358,8 @@ with tab_jobs:
                     "Notiz": m.get("status_notiz") or "",
                     "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
                     "GF-Alter": c.get("gf_alter"),
-                    "Firma": c.get("name"),
-                    "Firmen-PLZ": c.get("plz"),
+                    "Firma": c.get("name") or f"{p.get('arbeitgeber')} — extern",
+                    "Firmen-PLZ": c.get("plz") or p.get("plz"),
                     "BA-Arbeitgeber": p.get("arbeitgeber"),
                     "Stellentitel": p.get("titel"),
                     "BA-Beruf": p.get("beruf"),
@@ -1451,6 +1452,9 @@ with tab_jobs_temp:
                 if not all(w in hay for w in jt_suche.lower().split()):
                     continue
             jt_rows.append({
+                "_pid": p["id"],
+                "Status": "neu",
+                "Notiz": "",
                 "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
                 "Arbeitgeber": p.get("arbeitgeber"),
                 "Stellentitel": p.get("titel"),
@@ -1461,17 +1465,56 @@ with tab_jobs_temp:
                 "Keyword": p.get("keyword"),
             })
         st.caption(f"{len(jt_rows)} Anzeigen ohne Zielliste-Match "
-                   f"(von {len(offen)} offenen, {len(jt_postings)} gesamt).")
+                   f"(von {len(offen)} offenen, {len(jt_postings)} gesamt). "
+                   "Status setzen + speichern → die Anzeige wandert als externer "
+                   "Signal-Lead in den Tab »Job-Signale«.")
         if jt_rows:
-            st.dataframe(
-                pd.DataFrame(jt_rows), hide_index=True, width="stretch",
+            jt_df = pd.DataFrame(jt_rows).set_index("_pid")
+            jt_edited = st.data_editor(
+                jt_df, hide_index=True, width="stretch",
                 height=min(560, 60 + 35 * len(jt_rows)),
+                key="jt_editor",
+                disabled=[col for col in jt_df.columns if col not in ("Status", "Notiz")],
                 column_config={
+                    "Status": st.column_config.SelectboxColumn(
+                        "Status", options=JOB_STATI, required=True, width="small"),
+                    "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
                     "Anzeige": st.column_config.LinkColumn(
                         "Anzeige", display_text="Link", width="small"),
                     "Arbeitgeber": st.column_config.TextColumn("Arbeitgeber", width="medium"),
                     "Stellentitel": st.column_config.TextColumn("Stellentitel", width="medium"),
                 })
+            if st.button("Änderungen speichern", type="primary", key="jt_save"):
+                cl_jt = get_client()
+                n_neu = 0
+                try:
+                    for pid in jt_edited.index:
+                        jt_status = jt_edited.at[pid, "Status"]
+                        jt_notiz = (jt_edited.at[pid, "Notiz"] or "").strip()
+                        if jt_status == "neu" and not jt_notiz:
+                            continue
+                        # Externer Signal-Lead (Migration 0008): job_matches ohne Firma.
+                        cl_jt.table("job_matches").insert({
+                            "posting_id": pid,
+                            "company_id": None,
+                            "match_stufe": "extern",
+                            "prio": "unbekannt",
+                            "status": jt_status,
+                            "status_notiz": jt_notiz or None,
+                            "reviewed_at": (datetime.now(timezone.utc).isoformat()
+                                            if jt_status != "neu" else None),
+                        }).execute()
+                        n_neu += 1
+                    if n_neu:
+                        load_job_signale.clear()
+                        st.toast(f"{n_neu} Anzeige(n) in »Job-Signale« übernommen.")
+                        st.rerun()
+                    else:
+                        st.toast("Keine Änderungen.")
+                except Exception as e:                         # noqa: BLE001
+                    st.error(f"Speichern fehlgeschlagen: {e} — falls »null value in "
+                             "column company_id«: Migration 0008 im Supabase-Studio "
+                             "ausführen (sql/migrations/0008_job_matches_extern.sql).")
         else:
             st.info("Kein Treffer im Filter.")
 
