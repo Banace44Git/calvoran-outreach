@@ -1352,7 +1352,7 @@ with tab_jobs:
                     "_id": m["id"],
                     "Status": m["status"],
                     "Notiz": m.get("status_notiz") or "",
-                    "Prio": m["prio"],
+                    "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
                     "GF-Alter": c.get("gf_alter"),
                     "Firma": c.get("name"),
                     "Firmen-PLZ": c.get("plz"),
@@ -1365,7 +1365,6 @@ with tab_jobs:
                     "Stufe": m["match_stufe"],
                     "Score": m["match_score"],
                     "Welle 1": m["company_id"] in w1,
-                    "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
                 })
             if not js_rows:
                 st.info("Kein Match im Filter.")
@@ -1382,14 +1381,13 @@ with tab_jobs:
                         "Status": st.column_config.SelectboxColumn(
                             "Status", options=JOB_STATI, required=True, width="small"),
                         "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
-                        "Prio": st.column_config.TextColumn("Prio", width="small"),
+                        "Anzeige": st.column_config.LinkColumn(
+                            "Anzeige", display_text="Link", width="small"),
                         "GF-Alter": st.column_config.NumberColumn("GF-Alter", width="small"),
                         "Score": st.column_config.NumberColumn(
                             "Score", format="%.0f", width="small"),
                         "Welle 1": st.column_config.CheckboxColumn(
                             "W1", help="war in der Welle-1-Kuratierung", width="small"),
-                        "Anzeige": st.column_config.LinkColumn(
-                            "Anzeige", display_text="öffnen", width="small"),
                     })
                 if st.button("Änderungen speichern", type="primary", key="js_save"):
                     cl_js = get_client()
