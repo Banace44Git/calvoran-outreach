@@ -1251,9 +1251,9 @@ with tab_funnel:
 # GF / kaufmännische Leitung / zweite Ebene. Sichtung pflegt job_matches.status
 # (neu -> gesichtet/relevant/irrelevant); 'relevant' ist der Outreach-Vorrat für Phase B.
 
-JOB_STATI = ["neu", "gesichtet", "relevant", "irrelevant", "outreach"]
+JOB_STATI = ["neu", "gesichtet", "relevant", "irrelevant", "outreach", "abgelehnt"]
 _JS_PRIO_ORD = {"hoch": 0, "unbekannt": 1, "mittel": 2, "niedrig": 3}
-_JS_STUFE_ORD = {"exakt": 0, "fuzzy": 1, "region": 2, "fuzzy_grenzfall": 3}
+_JS_STUFE_ORD = {"exakt": 0, "fuzzy": 1, "region": 2, "fuzzy_grenzfall": 3, "extern": 4}
 
 
 @st.cache_data(ttl=120, show_spinner="Lade Job-Signale …")
@@ -1334,8 +1334,10 @@ with tab_jobs:
                           help="Alle Status/Prioritäten anzeigen — Suchtext bleibt erhalten.")
 
             def _js_sort(m):
-                return (JOB_STATI.index(m["status"]), _JS_PRIO_ORD[m["prio"]],
-                        _JS_STUFE_ORD[m["match_stufe"]], -(m["match_score"] or 0))
+                # .get mit Default: unbekannte Stufen/Stati dürfen nie die Ansicht crashen.
+                return (JOB_STATI.index(m["status"]) if m["status"] in JOB_STATI else 9,
+                        _JS_PRIO_ORD.get(m["prio"], 9),
+                        _JS_STUFE_ORD.get(m["match_stufe"], 9), -(m["match_score"] or 0))
 
             js_rows, js_orig = [], {}
             for m in sorted(js_matches, key=_js_sort):

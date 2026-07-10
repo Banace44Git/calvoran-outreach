@@ -335,7 +335,7 @@ def cmd_reprio(args, cfg: dict, log: JsonLogger) -> None:
                    for r in fetch_all(client, "companies", "id,gf_alter")}
     n = 0
     for m in matches:
-        if m["status"] == "irrelevant":
+        if m["status"] in ("irrelevant", "abgelehnt"):
             continue
         soll = prio_from_alter(alter_by_id.get(m["company_id"]))
         if soll != m["prio"]:
@@ -361,7 +361,8 @@ def cmd_report(args, cfg: dict, log: JsonLogger) -> None:
 
     monat = Counter((m_p.get("veroeffentlicht_am") or "")[:7] or "unbekannt"
                     for m in matches if (m_p := p_by_id.get(m["posting_id"])))
-    relevante = [m for m in matches if m["status"] in ("relevant", "outreach")]
+    # 'abgelehnt' zählt zur Kontakt-Basis (Brief ging raus), nur nicht zum aktiven Vorrat.
+    relevante = [m for m in matches if m["status"] in ("relevant", "outreach", "abgelehnt")]
     briefe = gespraeche = 0
     if relevante:
         cids = list({m["company_id"] for m in relevante if m["company_id"]})
