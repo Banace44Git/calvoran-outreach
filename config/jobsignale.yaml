@@ -71,3 +71,4 @@ match:
 
 exclude_arbeitgeber:                  # Substring (case-insensitiv) gegen den Arbeitgebernamen
   - "EY Consulting"                   # Big-4-Eigenanzeigen, keine Mandanten (Jo, 09.07.2026)
+  - "ENERDOMO"                        # Lizenz-/Franchisepartner-Suche als GF-Anzeige in 19 Städten (Jo, 11.07.2026)
