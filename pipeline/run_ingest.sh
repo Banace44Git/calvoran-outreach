@@ -37,6 +37,13 @@ WEB_TAIL="${WEB_TAIL:-0}"
 MODE="${1:-all}"
 LOG="$HOME/projects/os/01-projects/fractional-cfo/outreach/ingest-$(date +%F).log"
 
+# RAM-Guard: der teure c3-Schritt (Gemma) weicht der hr-engine aus. Nur aktiv mit
+# C3_RAM_GUARD=1 (der Dauer-Daemon setzt das); manuelle Laeufe bleiben unveraendert.
+C3_RAM_GUARD="${C3_RAM_GUARD:-0}"
+C3_MIN_FREE_PCT="${C3_MIN_FREE_PCT:-20}"
+C3_UNLOAD_ON_SKIP="${C3_UNLOAD_ON_SKIP:-0}"
+GEMMA_MODEL="${GEMMA_MODEL:-gemma4:26b}"
+
 cd "$ROOT" || { echo "calvoran-outreach fehlt"; exit 1; }
 ts() { date '+%F %T'; }
 run() {
@@ -45,6 +52,24 @@ run() {
   local rc=$?
   echo "[$(ts)] < rc=$rc" | tee -a "$LOG"
   return $rc
+}
+
+# c3_ram_ok: true, wenn c3 (Gemma) laufen darf. Bei aktivem Guard und zu wenig freiem
+# RAM wird c3 uebersprungen (hr-engine-Vorrang) und optional das Modell entladen, damit
+# der Speicher der hr-engine zur Verfuegung steht.
+c3_ram_ok() {
+  [ "$C3_RAM_GUARD" = "1" ] || return 0
+  local free
+  free=$(memory_pressure 2>/dev/null | awk -F: '/free percentage/{gsub(/[^0-9]/,"",$2); print $2; exit}')
+  [ -z "$free" ] && return 0   # nicht messbar -> nicht blockieren
+  if [ "$free" -lt "$C3_MIN_FREE_PCT" ]; then
+    echo "[$(ts)] c3 uebersprungen: RAM frei ${free}% < ${C3_MIN_FREE_PCT}% (hr-engine-Vorrang)" | tee -a "$LOG"
+    if [ "$C3_UNLOAD_ON_SKIP" = "1" ]; then
+      ollama stop "$GEMMA_MODEL" >/dev/null 2>&1 && echo "[$(ts)] Gemma entladen ($GEMMA_MODEL)" | tee -a "$LOG"
+    fi
+    return 1
+  fi
+  return 0
 }
 
 phase_data() {
@@ -73,7 +98,7 @@ phase_web() {
     echo "[$(ts)] === WEB-Phase (IDS_FILE=$IDS_FILE) ===" | tee -a "$LOG"
     [ -f "$IDS_FILE" ] || { echo "[$(ts)] IDS_FILE fehlt: $IDS_FILE"; return 1; }
     run "$PY" pipeline/c2_crawl.py   --ids-file "$IDS_FILE" || true
-    run "$PY" pipeline/c3_extract.py --ids-file "$IDS_FILE" --report || true
+    if c3_ram_ok; then run "$PY" pipeline/c3_extract.py --ids-file "$IDS_FILE" --report || true; fi
     run "$PY" pipeline/c4_score_cluster.py --ids-file "$IDS_FILE" --report || true
     return 0
   fi
@@ -82,8 +107,11 @@ phase_web() {
   run "$PY" pipeline/c2_crawl.py --min-score "$MIN_SCORE" || true
   [ "$WEB_TAIL" = "1" ] && run "$PY" pipeline/c2_crawl.py || true
   # 5. Dossiers (teuer, Gemma lokal): priorisiert. Resume-bar via bestehendes Dossier.
-  run "$PY" pipeline/c3_extract.py --min-score "$MIN_SCORE" --report || true
-  [ "$WEB_TAIL" = "1" ] && run "$PY" pipeline/c3_extract.py --report || true
+  #    RAM-Guard: bei aktivem C3_RAM_GUARD weicht dieser Schritt der hr-engine aus.
+  if c3_ram_ok; then
+    run "$PY" pipeline/c3_extract.py --min-score "$MIN_SCORE" --report || true
+    [ "$WEB_TAIL" = "1" ] && run "$PY" pipeline/c3_extract.py --report || true
+  fi
   # 6. Deterministisches Scoring (kein LLM, schnell).
   run "$PY" pipeline/c4_score_cluster.py --report || true
 }
