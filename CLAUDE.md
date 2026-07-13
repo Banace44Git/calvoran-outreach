@@ -25,7 +25,9 @@ pipeline/c6_jobsignale.py            BA-Jobsuche -> job_postings/job_matches (s.
 ```
 
 Dashboard: `.venv/bin/streamlit run dashboard/kuratierung.py` (Port 8502; 8501 gehört
-einem fremden Projekt). Tabs: Tabelle, Karteikarte, Nachverfolgung (Anruf-CRM), Job-Signale.
+einem fremden Projekt). Tabs: Tabelle, Karteikarte, Nachverfolgung (Anruf-CRM), Job-Signale
+(Zielliste-Matches) sowie »Job-Signale kfm.Ltg.« / »Job-Signale Contr./Fibu« (Anzeigen ohne
+Match, getrennt nach Keyword-Gruppe aus `config/jobsignale.yaml`).
 
 ## Job-Signal-Modul (c6)
 
@@ -48,7 +50,8 @@ ignoriert die API **still** (= ungefiltert); der Client snappt aufwärts. Ohne d
 Parameter liefert die API ALLE aktiven Anzeigen — genau das nutzt `--backfill`, denn
 Langläufer (>28 Tage offen, Besetzungsschwierigkeit) sind sonst unsichtbar.
 
-Konfig: `config/jobsignale.yaml` (Keywords, Titel-Filter, Match-Schwellwerte).
+Konfig: `config/jobsignale.yaml` (Keyword-Gruppen kfm_ltg/contr_fibu mit je eigener
+Titel-Positivliste, gemeinsame Negativlisten, Match-Schwellwerte).
 Sichtung: Dashboard-Tab »Job-Signale« (Status neu → gesichtet/relevant/irrelevant).
 Phase B (nach Sichtungsmonat, User-Go nötig): Hermes-Cron täglich + Brief »zweite
 Führungsebene« über c5-Mechanik.

@@ -1,58 +1,80 @@
 # Job-Signal-Modul (c6): BA-Jobsuche als Nachfolge-Signal.
 #
-# Leitidee (Jo): Sucht eine Zielfirma per Stellenanzeige einen GF, eine kaufmännische
-# Leitung oder eine zweite Führungsebene, deutet das bei Inhabern 58+ auf Übergabe-
-# vorbereitung oder gescheiterte interne Nachfolge — zeitkritisches, hochrelevantes
-# Outreach-Signal. Die API kann nicht nach PLZ/Bundesland filtern, deshalb wird je
-# Keyword bundesweit gescannt und lokal gegen calvoran.companies gematcht.
+# Leitidee (Jo): Sucht eine Zielfirma per Stellenanzeige eine kaufmännische Leitung /
+# GF / zweite Führungsebene bzw. baut sie eine Controlling-/Finanzbuchhaltungs-Funktion
+# auf, deutet das bei Inhabern 58+ auf Übergabevorbereitung oder Entlastungsbedarf —
+# zeitkritisches Outreach-Signal. Die API kann nicht nach PLZ/Bundesland filtern,
+# deshalb wird je Keyword bundesweit gescannt und lokal gegen calvoran.companies gematcht.
+#
+# Keyword-GRUPPEN (Jo, 13.07.2026): zwei Signal-Kategorien mit je EIGENER Titel-
+# Positivliste — der Positiv-Filter unterscheidet sich je Gruppe (die kfm-Leitungs-
+# Liste würde sonst jede Controller/Fibu-Anzeige verwerfen). Das je Anzeige gespeicherte
+# `keyword` ordnet sie im Dashboard einem Tab zu:
+#   kfm_ltg    -> Tab »Job-Signale kfm.Ltg.«     (GF / kaufm. Leitung / CFO)
+#   contr_fibu -> Tab »Job-Signale Contr./Fibu«  (Leitung Rechnungswesen / Finanzen / Controlling)
 
-keywords:                             # BA-Freitextsuche `was`, je Keyword ein Scan
-  - "Geschäftsführer"
-  - "Kaufmännische Leitung"
-  - "Kaufmännischer Leiter"           # BA-Titel sind oft maskulin ausgeschrieben
-  - "CFO"
-  # "Betriebsleiter" entfernt (Jo, 08.07.2026): überwiegend Gastro/Technik-Rauschen.
-  # "Assistenz der Geschäftsführung" entfernt (Jo, 08.07.2026): Assistenz* im Titel
-  # ist Müll — damit stirbt praktisch jeder Treffer dieses Keywords. Phase-B-Idee
-  # (»Assistenz der GF mit Perspektive« via Volltext-Detailabruf) bleibt denkbar.
+keyword_gruppen:
+  kfm_ltg:
+    label: "kfm.Ltg."
+    keywords:                          # BA-Freitextsuche `was`, je Keyword ein Scan
+      - "Geschäftsführer"
+      - "Kaufmännische Leitung"
+      - "Kaufmännischer Leiter"        # BA-Titel sind oft maskulin ausgeschrieben
+      - "CFO"
+    titel_positiv:                     # Titel ODER BA-Hauptberuf muss eins enthalten
+      - "geschaftsfuhr"                # Geschäftsführer/-in, -führung
+      - "geschaftsleit"                # Geschäftsleitung/-leiter
+      - "kaufmannische leit"           # Kaufmännische Leitung
+      - "kaufmannischer leit"          # Kaufmännischer Leiter
+      - "kaufm leit"
+      - "cfo"
+  contr_fibu:                          # Nur LEITUNGSEBENE (Jo, 13.07.2026): Fachkraft-
+    label: "Contr./Fibu"               # Massenstellen (Controller/Finanz-/Bilanzbuchhalter)
+    keywords:                          # sind als Übergabe-Signal zu schwach und fluten (>3800
+      - "Leiter Rechnungswesen"        # Anzeigen). Die Leitung der Finanzfunktion bei
+      - "Leiter Finanzen"              # inhabergeführten Firmen ist das eigentliche Signal.
+      - "Leiter Controlling"
+    titel_positiv:                     # nur Leitung — reine Fachkraft-Titel fallen durch
+      - "leiter rechnungswesen"
+      - "leitung rechnungswesen"
+      - "leiter finan"                 # Leiter/Bereichsleiter Finanzen/Finance
+      - "leitung finan"
+      - "leiter controll"              # Leiter Controlling
+      - "leitung controll"
 
-# Die BA-Freitextsuche `was` matcht den GANZEN Anzeigentext, nicht nur den Titel —
-# ohne Titel-Filter landen z.B. Verkäufer-Anzeigen im Ergebnis, weil »Geschäftsführer«
-# in der Firmenbeschreibung vorkommt. Begriffe sind normalisierte Substrings
-# (ASCII, lower) gegen Titel + Hauptberuf. Verworfene werden gezählt, nicht still gedroppt.
+# Gemeinsame Filter (gelten für ALLE Keyword-Gruppen). Begriffe sind normalisierte
+# Substrings (ASCII, lower). Die BA-Freitextsuche `was` matcht den GANZEN Anzeigentext,
+# nicht nur den Titel — ohne Titel-Filter landen z.B. Verkäufer-Anzeigen im Ergebnis,
+# weil ein Keyword in der Firmenbeschreibung vorkommt. Verworfene werden gezählt.
 titel_filter:
   aktiv: true
-  begriffe:                      # Positiv: Titel ODER BA-Hauptberuf muss eins enthalten
-    - "geschaftsfuhr"            # Geschäftsführer/-in, -führung
-    - "geschaftsleit"            # Geschäftsleitung/-leiter
-    - "kaufmannische leit"       # Kaufmännische Leitung
-    - "kaufmannischer leit"      # Kaufmännischer Leiter
-    - "kaufm leit"
-    - "cfo"
-  # Negativ (Jo, 08.07.2026): Datenmüll-Muster, geprüft NUR gegen den Stellentitel —
-  # bewusst nicht gegen den BA-Hauptberuf (dessen Taxonomie klassifiziert echte
-  # kaufmännische Leitungen als »Betriebsleiter/in - kaufmännisch«). Exclude schlägt Positiv.
+  # Negativ (schlägt Positiv), geprüft NUR gegen den Stellentitel — bewusst nicht gegen
+  # den BA-Hauptberuf (dessen Taxonomie klassifiziert echte kaufm. Leitungen als
+  # »Betriebsleiter/in - kaufmännisch«).
   exclude:
-    - "schichtleit"              # Schichtleit*
-    - "managementassisten"       # Managementassisten*
+    - "schichtleit"                    # Schichtleit*
+    - "managementassisten"             # Managementassisten*
     - "technischer leiter"
     - "technische leitung"
-    - "betriebsleit"             # Betriebsleiter*/-leitung
+    - "betriebsleit"                   # Betriebsleiter*/-leitung
     - "general manager"
     - "restaurantleiter"
-    - "serviceleit"              # Serviceleit*
+    - "serviceleit"                    # Serviceleit*
     - "franchisepartner"
-    - "zeitarbeit"               # Zeitarbeit*
+    - "zeitarbeit"                     # Zeitarbeit*
     - "jurist"
-    - "vertrieb"                 # Vertrieb* (Jo, 08.07.2026)
-    - "sachbearbeiter"           # Sachbearbeiter*
-    - "assistenz"                # Assistenz* (deckt auch »Assistenz der Geschäftsleitung«)
-    - "assistent"                # Assistent (m/w/d) Geschäftsführer o.ä.
-  # Negativ gegen den BA-Hauptberuf (Jo, 08.07.2026) — hier ist die Taxonomie selbst
-  # das Signal: *ingenieur*/vertrieb* klassifizierte Stellen sind keine kaufm. Leitung.
+    - "vertrieb"                       # Vertrieb* (Jo, 08.07.2026)
+    - "sachbearbeiter"                 # Sachbearbeiter* (deckt »Sachbearbeiter Rechnungswesen«)
+    - "assistenz"                      # Assistenz* (auch »Assistenz der Geschäftsleitung«)
+    - "assistent"                      # Assistent (m/w/d) Geschäftsführer o.ä.
+    - "junior"                         # Nachwuchs raus (Jo, 13.07.2026, v.a. Controller)
+    - "werkstudent"
+    - "praktik"                        # Praktikum/Praktikant/-in
+    - "studentische"                   # Studentische Aushilfe/Hilfskraft
+  # Negativ gegen den BA-Hauptberuf — hier ist die Taxonomie selbst das Signal.
   exclude_beruf:
-    - "ingenieur"                # *ingenieur*
-    - "vertrieb"                 # vertrieb* (z.B. Vertriebs-Geschäftsführer/in)
+    - "ingenieur"                      # *ingenieur*
+    - "vertrieb"                       # vertrieb* (z.B. Vertriebs-Geschäftsführer/in)
 
 api:
   veroeffentlichtseit: 7              # Default für --since. Die v6-API akzeptiert NUR
@@ -71,4 +93,4 @@ match:
 
 exclude_arbeitgeber:                  # Substring (case-insensitiv) gegen den Arbeitgebernamen
   - "EY Consulting"                   # Big-4-Eigenanzeigen, keine Mandanten (Jo, 09.07.2026)
-  - "ENERDOMO"                        # Lizenz-/Franchisepartner-Suche als GF-Anzeige in 19 Städten (Jo, 11.07.2026)
+  - "ENERDOMO"                        # Lizenz-/Franchisepartner-Suche als GF-Anzeige (Jo, 11.07.2026)

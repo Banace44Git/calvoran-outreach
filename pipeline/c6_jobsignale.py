@@ -85,11 +85,17 @@ def welle1_ids() -> set[str]:
 
 
 def titel_regeln(cfg: dict):
-    """(positiv, negativ_titel, negativ_beruf) — normalisierte Substring-Listen."""
+    """(gruppen_positiv, negativ_titel, negativ_beruf) — normalisierte Substrings.
+
+    gruppen_positiv: {gruppe_key: [positiv-begriffe]} — je Keyword-Gruppe eine eigene
+    Positivliste (kaufm. Leitung vs. Controlling/Fibu tragen verschiedene Titel). Die
+    Negativlisten gelten gemeinsam."""
     tf = cfg.get("titel_filter") or {}
     if not tf.get("aktiv"):
-        return [], [], []
-    return ([norm_text(b) for b in tf.get("begriffe", [])],
+        return {}, [], []
+    gruppen_positiv = {gk: [norm_text(b) for b in (g.get("titel_positiv") or [])]
+                       for gk, g in (cfg.get("keyword_gruppen") or {}).items()}
+    return (gruppen_positiv,
             [norm_text(e) for e in tf.get("exclude", [])],
             [norm_text(e) for e in tf.get("exclude_beruf", [])])
 
@@ -113,33 +119,37 @@ def titel_ok(p: dict, begriffe: list[str], negativ_titel: list[str],
 
 
 def api_pull(cfg: dict, tage: int) -> tuple[dict[str, dict], Counter, int]:
-    """Alle Keywords scannen; Dedup über refnr (erstes Keyword gewinnt).
+    """Alle Keyword-Gruppen scannen; Dedup über refnr (erstes Keyword gewinnt).
 
-    `was` matcht den ganzen Anzeigentext — der Titel-Filter (positiv + negativ) hält
-    nur Führungs-Anzeigen (Anzahl Drops im Rückgabewert, kein stilles Verwerfen).
+    Je Keyword greift die Positivliste SEINER Gruppe (kfm.Ltg. vs. Contr./Fibu), die
+    Negativlisten gelten gemeinsam. `was` matcht den ganzen Anzeigentext — der Titel-
+    Filter hält nur einschlägige Anzeigen (Anzahl Drops im Rückgabewert, kein stilles
+    Verwerfen). Reihenfolge kfm_ltg -> contr_fibu: Leitung schlägt Controlling beim Dedup.
     """
     api = cfg["api"]
     excludes = [e.lower() for e in (cfg.get("exclude_arbeitgeber") or [])]
-    begriffe, negativ_titel, negativ_beruf = titel_regeln(cfg)
+    gruppen_positiv, negativ_titel, negativ_beruf = titel_regeln(cfg)
     postings: dict[str, dict] = {}
     je_keyword: Counter = Counter()
     titel_drops = 0
     with BaJobsucheClient(drossel_sekunden=api["drossel_sekunden"]) as ba:
-        for kw in cfg["keywords"]:
-            for item in ba.search_all(
-                    kw, veroeffentlichtseit=tage, size=api["size"],
-                    max_pages=api["max_pages_je_keyword"],
-                    zeitarbeit=api["zeitarbeit"], pav=api["pav"]):
-                p = parse_posting(item, kw)
-                if p is None:
-                    continue
-                if any(e in p["arbeitgeber"].lower() for e in excludes):
-                    continue
-                if not titel_ok(p, begriffe, negativ_titel, negativ_beruf):
-                    titel_drops += 1
-                    continue
-                je_keyword[kw] += 1
-                postings.setdefault(p["refnr"], p)
+        for gk, g in cfg["keyword_gruppen"].items():
+            positiv = gruppen_positiv.get(gk, [])
+            for kw in g["keywords"]:
+                for item in ba.search_all(
+                        kw, veroeffentlichtseit=tage, size=api["size"],
+                        max_pages=api["max_pages_je_keyword"],
+                        zeitarbeit=api["zeitarbeit"], pav=api["pav"]):
+                    p = parse_posting(item, kw)
+                    if p is None:
+                        continue
+                    if any(e in p["arbeitgeber"].lower() for e in excludes):
+                        continue
+                    if not titel_ok(p, positiv, negativ_titel, negativ_beruf):
+                        titel_drops += 1
+                        continue
+                    je_keyword[kw] += 1
+                    postings.setdefault(p["refnr"], p)
     return postings, je_keyword, titel_drops
 
 
@@ -229,7 +239,8 @@ def cmd_fetch(args, cfg: dict, log: JsonLogger) -> None:
         gewuenscht = args.since or cfg["api"]["veroeffentlichtseit"]
         tage = snap_veroeffentlichtseit(int(gewuenscht))
         fenster = f"veroeffentlichtseit={tage} Tage (angefragt {gewuenscht}, API kennt nur 1/7/14/28)"
-    print(f"BA-Scan: {len(cfg['keywords'])} Keywords, {fenster} "
+    n_kw = sum(len(g["keywords"]) for g in cfg["keyword_gruppen"].values())
+    print(f"BA-Scan: {n_kw} Keywords in {len(cfg['keyword_gruppen'])} Gruppen, {fenster} "
           f"{'(DRY-RUN)' if args.dry_run else ''}")
     postings, je_keyword, titel_drops = api_pull(cfg, tage)
     print(f"Anzeigen (dedupliziert): {len(postings)}  "
@@ -271,7 +282,11 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
     client = get_client()
     postings = fetch_all(client, "job_postings", "id,refnr,titel,beruf,arbeitgeber,plz,ort,raw")
 
-    begriffe, negativ_titel, negativ_beruf = titel_regeln(cfg)
+    gruppen_positiv, negativ_titel, negativ_beruf = titel_regeln(cfg)
+    # Müll-Prüfung gegen die VEREINIGUNG aller Gruppen-Positivlisten: eine Anzeige
+    # bleibt, wenn sie irgendeine Gruppe besteht (die Kategorie/keyword ändert rematch
+    # nicht, nur klaren Titel-Müll löscht es).
+    alle_positiv = [b for lst in gruppen_positiv.values() for b in lst]
     bestand_alle = fetch_all(client, "job_matches", "id,posting_id,company_id,status")
     # Geschützt: gesichtete Matches UND externe Signal-Leads (company_id NULL,
     # Migration 0008) — die entstehen manuell im TEMP-Tab, nie aus dem Matching.
@@ -279,7 +294,7 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
                   if b["status"] != "neu" or b["company_id"] is None}
     muell_ids = {p["id"] for p in postings
                  if p["id"] not in geschuetzt
-                 and not titel_ok(p, begriffe, negativ_titel, negativ_beruf)}
+                 and not titel_ok(p, alle_positiv, negativ_titel, negativ_beruf)}
     for chunk in chunked(sorted(muell_ids), 100):
         client.table("job_postings").delete().in_("id", chunk).execute()
     postings = [p for p in postings if p["id"] not in muell_ids]

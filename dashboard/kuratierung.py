@@ -643,8 +643,9 @@ def _fmt_teur(v):
     return f"{int(v):,}".replace(",", ".") if pd.notna(v) else "—"
 
 
-tab_tbl, tab_card, tab_funnel, tab_jobs, tab_jobs_temp = st.tabs(
-    ["Tabelle", "Karteikarte", "Nachverfolgung", "Job-Signale", "Job-Signale TEMP"])
+tab_tbl, tab_card, tab_funnel, tab_jobs, tab_kfm, tab_cf = st.tabs(
+    ["Tabelle", "Karteikarte", "Nachverfolgung", "Job-Signale",
+     "Job-Signale kfm.Ltg.", "Job-Signale Contr./Fibu"])
 
 # ============================= TABELLE ============================= #
 with tab_tbl:
@@ -1430,112 +1431,140 @@ with tab_jobs:
                     except Exception as e:                     # noqa: BLE001
                         st.error(f"Speichern fehlgeschlagen: {e}")
 
-# ======================== JOB-SIGNALE TEMP ======================== #
-# Temporäre Ansicht (Jo, 09.07.2026): aktive Führungs-Anzeigen OHNE Match zur
-# Zielliste — potenzielle NEUE Leads (Signal zuerst, Qualifizierung danach).
-# Read-only: die Anzeigen haben keine job_matches-Zeile, es gibt nichts zu pflegen.
+# ============ JOB-SIGNALE kfm.Ltg. / Contr./Fibu (ohne Zielliste-Match) ============ #
+# Zwei Tabs mit identischer Mechanik, getrennt nach Keyword-Gruppe (config/jobsignale.yaml):
+# aktive Anzeigen OHNE Zielliste-Match — potenzielle NEUE Leads (Signal zuerst,
+# Qualifizierung danach). Status/irr. setzen erzeugt einen externen Signal-Lead
+# (job_matches, company_id NULL, Migration 0008).
 
-with tab_jobs_temp:
-    st.caption("Aktive Führungs-Anzeigen **ohne** Zielliste-Match — Kandidaten für eine "
+@st.cache_data(ttl=600)
+def load_keyword_gruppen() -> dict:
+    """{gruppe_key: {'label': str, 'keywords': set}} aus config/jobsignale.yaml —
+    dieselbe Quelle, aus der c6 scannt, damit die Tab-Zuordnung synchron bleibt."""
+    import yaml
+    try:
+        cfg = yaml.safe_load((Path(_ROOT) / "config" / "jobsignale.yaml")
+                             .read_text(encoding="utf-8"))
+    except (FileNotFoundError, yaml.YAMLError):
+        return {}
+    return {gk: {"label": g.get("label", gk), "keywords": set(g.get("keywords") or [])}
+            for gk, g in (cfg.get("keyword_gruppen") or {}).items()}
+
+
+def render_jobsignal_offen(gehoert, key_prefix: str) -> None:
+    """Aktive Anzeigen OHNE Zielliste-Match, deren keyword `gehoert(keyword)` erfüllt.
+    Status/irr. setzen -> externer Signal-Lead. Widget-keys über key_prefix isoliert."""
+    st.caption("Aktive Anzeigen **ohne** Zielliste-Match — Kandidaten für eine "
                "Ziellisten-Erweiterung. Älteste zuerst (Langläufer = Besetzungsschwierigkeit).")
     _jt = load_job_signale()
     if _jt is None:
         st.warning("Job-Signale inaktiv — Migration 0007 (job_postings/job_matches) noch "
                    "nicht im Supabase-Studio angewandt.")
-    else:
-        jt_matches, jt_postings, _jt_firma = _jt
-        gematcht = {m["posting_id"] for m in jt_matches}
-        offen = [p for p in jt_postings.values() if p["id"] not in gematcht]
+        return
+    jt_matches, jt_postings, _jt_firma = _jt
+    gematcht = {m["posting_id"] for m in jt_matches}
+    offen = [p for p in jt_postings.values()
+             if p["id"] not in gematcht and gehoert(p.get("keyword") or "")]
 
-        jtf = st.columns([2, 2])
-        jt_suche = jtf[0].text_input("Suche (Arbeitgeber/Titel/Ort)", key="jt_suche")
-        jt_kws = sorted({p.get("keyword") or "?" for p in offen})
-        jt_kw_sel = jtf[1].multiselect("Keyword", jt_kws, default=jt_kws, key="jt_kw")
+    jtf = st.columns([2, 2])
+    jt_suche = jtf[0].text_input("Suche (Arbeitgeber/Titel/Ort)", key=f"{key_prefix}_suche")
+    jt_kws = sorted({p.get("keyword") or "?" for p in offen})
+    jt_kw_sel = jtf[1].multiselect("Keyword", jt_kws, default=jt_kws, key=f"{key_prefix}_kw")
 
-        jt_rows = []
-        for p in sorted(offen, key=lambda p: p.get("veroeffentlicht_am") or "9999"):
-            if (p.get("keyword") or "?") not in jt_kw_sel:
+    jt_rows = []
+    for p in sorted(offen, key=lambda p: p.get("veroeffentlicht_am") or "9999"):
+        if (p.get("keyword") or "?") not in jt_kw_sel:
+            continue
+        if jt_suche.strip():
+            hay = " ".join(str(v or "") for v in (
+                p.get("arbeitgeber"), p.get("titel"), p.get("beruf"),
+                p.get("ort"), p.get("plz"))).lower()
+            if not all(w in hay for w in jt_suche.lower().split()):
                 continue
-            if jt_suche.strip():
-                hay = " ".join(str(v or "") for v in (
-                    p.get("arbeitgeber"), p.get("titel"), p.get("beruf"),
-                    p.get("ort"), p.get("plz"))).lower()
-                if not all(w in hay for w in jt_suche.lower().split()):
+        jt_rows.append({
+            "_pid": p["id"],
+            "Status": "neu",
+            "irr.": False,
+            "Notiz": "",
+            "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
+            "Arbeitgeber": p.get("arbeitgeber"),
+            "Stellentitel": p.get("titel"),
+            "BA-Beruf": p.get("beruf"),
+            "Ort": f"{p.get('plz') or ''} {p.get('ort') or ''}".strip(),
+            "veröffentlicht": _de_date(p.get("veroeffentlicht_am")),
+            "zuletzt gesehen": _de_date(p.get("letzte_sichtung")),
+            "Keyword": p.get("keyword"),
+        })
+    st.caption(f"{len(jt_rows)} Anzeigen ohne Zielliste-Match in dieser Gruppe "
+               f"(von {len(offen)} offenen). Status setzen oder »irr.« ankreuzen (mehrere "
+               "möglich), dann **einmal** speichern → externer Signal-Lead in »Job-Signale« "
+               "(»irr.« = als irrelevant verwerfen).")
+    if not jt_rows:
+        st.info("Kein Treffer im Filter.")
+        return
+    jt_df = pd.DataFrame(jt_rows).set_index("_pid")
+    jt_edited = st.data_editor(
+        jt_df, hide_index=True, width="stretch",
+        height=min(560, 60 + 35 * len(jt_rows)),
+        key=f"{key_prefix}_editor",
+        disabled=[col for col in jt_df.columns if col not in ("Status", "irr.", "Notiz")],
+        column_config={
+            "Status": st.column_config.SelectboxColumn(
+                "Status", options=JOB_STATI, required=True, width="small"),
+            "irr.": st.column_config.CheckboxColumn(
+                "irr.", help="ankreuzen = beim Speichern als irrelevant verwerfen",
+                width="small"),
+            "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
+            "Anzeige": st.column_config.LinkColumn(
+                "Anzeige", display_text="Link", width="small"),
+            "Arbeitgeber": st.column_config.TextColumn("Arbeitgeber", width="medium"),
+            "Stellentitel": st.column_config.TextColumn("Stellentitel", width="medium"),
+        })
+    if st.button("Änderungen speichern", type="primary", key=f"{key_prefix}_save"):
+        cl_jt = get_client()
+        n_neu = 0
+        try:
+            for pid in jt_edited.index:
+                # »irr.«-Häkchen überstimmt die Status-Wahl (als irrelevant verwerfen).
+                jt_status = ("irrelevant" if jt_edited.at[pid, "irr."]
+                             else jt_edited.at[pid, "Status"])
+                jt_notiz = (jt_edited.at[pid, "Notiz"] or "").strip()
+                if jt_status == "neu" and not jt_notiz:
                     continue
-            jt_rows.append({
-                "_pid": p["id"],
-                "Status": "neu",
-                "irr.": False,
-                "Notiz": "",
-                "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
-                "Arbeitgeber": p.get("arbeitgeber"),
-                "Stellentitel": p.get("titel"),
-                "BA-Beruf": p.get("beruf"),
-                "Ort": f"{p.get('plz') or ''} {p.get('ort') or ''}".strip(),
-                "veröffentlicht": _de_date(p.get("veroeffentlicht_am")),
-                "zuletzt gesehen": _de_date(p.get("letzte_sichtung")),
-                "Keyword": p.get("keyword"),
-            })
-        st.caption(f"{len(jt_rows)} Anzeigen ohne Zielliste-Match "
-                   f"(von {len(offen)} offenen, {len(jt_postings)} gesamt). "
-                   "Status setzen oder »irr.« ankreuzen (mehrere möglich), dann **einmal** "
-                   "speichern → die Anzeige wandert als externer Signal-Lead in »Job-Signale« "
-                   "(»irr.« = als irrelevant verwerfen).")
-        if jt_rows:
-            jt_df = pd.DataFrame(jt_rows).set_index("_pid")
-            jt_edited = st.data_editor(
-                jt_df, hide_index=True, width="stretch",
-                height=min(560, 60 + 35 * len(jt_rows)),
-                key="jt_editor",
-                disabled=[col for col in jt_df.columns
-                          if col not in ("Status", "irr.", "Notiz")],
-                column_config={
-                    "Status": st.column_config.SelectboxColumn(
-                        "Status", options=JOB_STATI, required=True, width="small"),
-                    "irr.": st.column_config.CheckboxColumn(
-                        "irr.", help="ankreuzen = beim Speichern als irrelevant verwerfen",
-                        width="small"),
-                    "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
-                    "Anzeige": st.column_config.LinkColumn(
-                        "Anzeige", display_text="Link", width="small"),
-                    "Arbeitgeber": st.column_config.TextColumn("Arbeitgeber", width="medium"),
-                    "Stellentitel": st.column_config.TextColumn("Stellentitel", width="medium"),
-                })
-            if st.button("Änderungen speichern", type="primary", key="jt_save"):
-                cl_jt = get_client()
-                n_neu = 0
-                try:
-                    for pid in jt_edited.index:
-                        # »irr.«-Häkchen überstimmt die Status-Wahl (als irrelevant verwerfen).
-                        jt_status = ("irrelevant" if jt_edited.at[pid, "irr."]
-                                     else jt_edited.at[pid, "Status"])
-                        jt_notiz = (jt_edited.at[pid, "Notiz"] or "").strip()
-                        if jt_status == "neu" and not jt_notiz:
-                            continue
-                        # Externer Signal-Lead (Migration 0008): job_matches ohne Firma.
-                        cl_jt.table("job_matches").insert({
-                            "posting_id": pid,
-                            "company_id": None,
-                            "match_stufe": "extern",
-                            "prio": "unbekannt",
-                            "status": jt_status,
-                            "status_notiz": jt_notiz or None,
-                            "reviewed_at": (datetime.now(timezone.utc).isoformat()
-                                            if jt_status != "neu" else None),
-                        }).execute()
-                        n_neu += 1
-                    if n_neu:
-                        load_job_signale.clear()
-                        st.toast(f"{n_neu} Anzeige(n) in »Job-Signale« übernommen.")
-                        st.rerun()
-                    else:
-                        st.toast("Keine Änderungen.")
-                except Exception as e:                         # noqa: BLE001
-                    st.error(f"Speichern fehlgeschlagen: {e} — falls »null value in "
-                             "column company_id«: Migration 0008 im Supabase-Studio "
-                             "ausführen (sql/migrations/0008_job_matches_extern.sql).")
-        else:
-            st.info("Kein Treffer im Filter.")
+                # Externer Signal-Lead (Migration 0008): job_matches ohne Firma.
+                cl_jt.table("job_matches").insert({
+                    "posting_id": pid,
+                    "company_id": None,
+                    "match_stufe": "extern",
+                    "prio": "unbekannt",
+                    "status": jt_status,
+                    "status_notiz": jt_notiz or None,
+                    "reviewed_at": (datetime.now(timezone.utc).isoformat()
+                                    if jt_status != "neu" else None),
+                }).execute()
+                n_neu += 1
+            if n_neu:
+                load_job_signale.clear()
+                st.toast(f"{n_neu} Anzeige(n) in »Job-Signale« übernommen.")
+                st.rerun()
+            else:
+                st.toast("Keine Änderungen.")
+        except Exception as e:                             # noqa: BLE001
+            st.error(f"Speichern fehlgeschlagen: {e} — falls »null value in column "
+                     "company_id«: Migration 0008 im Supabase-Studio ausführen "
+                     "(sql/migrations/0008_job_matches_extern.sql).")
+
+
+_KW_GRUPPEN = load_keyword_gruppen()
+_KFM_KW = _KW_GRUPPEN.get("kfm_ltg", {}).get("keywords", set())
+_CF_KW = _KW_GRUPPEN.get("contr_fibu", {}).get("keywords", set())
+_ALLE_KW = _KFM_KW | _CF_KW
+with tab_kfm:
+    render_jobsignal_offen(lambda kw: kw in _KFM_KW, "jt_kfm")
+with tab_cf:
+    # contr_fibu + verwaiste Alt-keywords (Fachkraft-Reste, inhaltlich Finanz-Leitung:
+    # Titel besteht die Leitungs-Regel, sonst hätte rematch sie gelöscht).
+    render_jobsignal_offen(lambda kw: kw in _CF_KW or kw not in _ALLE_KW, "jt_cf")
 
 st.caption(
     f"Auswahl: {SELECTION_FILE}  ·  c5_export liest selected==true (decision==lead) je Welle.  "
