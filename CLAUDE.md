@@ -55,12 +55,17 @@ Führungsebene« über c5-Mechanik.
 
 ## Supabase (Schema `calvoran`)
 
+**Detail-Schema je Tabelle: `docs/schema/` (eine MD pro Tabelle — Spalten, Constraints,
+Join-Pfade, Fallstricke). Bei DB-Arbeit zuerst dort nachlesen.** `docs/schema/index.md` gibt
+den Graph-Überblick; `docs/schema/check_drift.py` prüft die Doku gegen das Live-Schema.
+
 - `companies` (Zielliste, `raw` jsonb, `gf_alter` partiell — Anreicherung läuft extern),
   `pages`, `dossiers`, `signals` (von c3 je Firma überschrieben!), `scores`
 - `outreach` (Brief/E-Mail je Welle, Unique `(company_id, channel, wave)`),
   `outreach_calls` (Anruf-CRM), `hermes_log`
-- `job_postings`/`job_matches` (Migration 0007) — BA-Anzeigen + Firmen-Matches
-- Migrationen: `sql/migrations/0001..0007`, einzeln im Supabase SQL-Editor ausführen
+- `job_postings`/`job_matches` (Migrationen 0007–0009) — BA-Anzeigen + Firmen-Matches
+- Migrationen: `sql/migrations/0001..0009`, einzeln im Supabase SQL-Editor ausführen.
+  Nach einer neuen Migration die betroffene `docs/schema/*.md` mitziehen + `check_drift.py` laufen lassen.
 
 ## Pfade außerhalb des Repos
 
