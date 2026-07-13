@@ -1357,6 +1357,7 @@ with tab_jobs:
                 js_rows.append({
                     "_id": m["id"],
                     "Status": m["status"],
+                    "irr.": False,
                     "Notiz": m.get("status_notiz") or "",
                     "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
                     "GF-Alter": c.get("gf_alter"),
@@ -1376,16 +1377,58 @@ with tab_jobs:
                 st.info("Kein Match im Filter.")
             else:
                 st.caption("Status/Notiz direkt in der Tabelle setzen, dann speichern. "
+                           "»irr.«-Häkchen wirkt sofort (= Status irrelevant), ohne Speichern. "
                            "Grenzfälle: BA-Arbeitgeber gegen Firma prüfen (Anzeige öffnen).")
+
+                # Ein-Klick »irr.«: on_change feuert bei jeder Editor-Änderung, wir
+                # verarbeiten aber nur gesetzte irr.-Häkchen und schreiben sofort zurück.
+                # edited_rows-Keys sind POSITIONALE Zeilenindizes -> id_order[pos] = _id
+                # (Reihenfolge = js_df.index zum Render-Zeitpunkt, via args gebunden).
+                def _js_irr_toggle(id_order):
+                    ed = st.session_state.get("js_editor", {}).get("edited_rows", {})
+                    to_irr = []
+                    for pos, changes in ed.items():
+                        if changes.get("irr.") is True:
+                            try:
+                                to_irr.append(id_order[int(pos)])
+                            except (IndexError, ValueError):
+                                continue
+                    if not to_irr:
+                        return
+                    now = datetime.now(timezone.utc).isoformat()
+                    try:
+                        cl = get_client()
+                        for mid in to_irr:
+                            (cl.table("job_matches")
+                             .update({"status": "irrelevant", "reviewed_at": now})
+                             .eq("id", mid).execute())
+                        load_job_signale.clear()
+                        st.session_state["js_irr_msg"] = f"{len(to_irr)}× irrelevant."
+                    except Exception as e:                     # noqa: BLE001
+                        st.session_state["js_irr_msg"] = f"irr. fehlgeschlagen: {e}"
+                    finally:
+                        # Editor-State leeren, sonst haftet das Häkchen an der Position,
+                        # die nach dem Rerun eine andere Zeile trägt.
+                        st.session_state.pop("js_editor", None)
+
+                _irr_msg = st.session_state.pop("js_irr_msg", None)
+                if _irr_msg:
+                    st.toast(_irr_msg)
+
                 js_df = pd.DataFrame(js_rows).set_index("_id")
                 js_edited = st.data_editor(
                     js_df, hide_index=True, width="stretch",
                     height=min(520, 60 + 35 * len(js_rows)),
                     key="js_editor",
-                    disabled=[col for col in js_df.columns if col not in ("Status", "Notiz")],
+                    on_change=_js_irr_toggle, args=(list(js_df.index),),
+                    disabled=[col for col in js_df.columns
+                              if col not in ("Status", "irr.", "Notiz")],
                     column_config={
                         "Status": st.column_config.SelectboxColumn(
                             "Status", options=JOB_STATI, required=True, width="small"),
+                        "irr.": st.column_config.CheckboxColumn(
+                            "irr.", help="Ein Klick = Status irrelevant (wirkt sofort)",
+                            width="small"),
                         "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
                         "Anzeige": st.column_config.LinkColumn(
                             "Anzeige", display_text="Link", width="small"),
@@ -1456,6 +1499,7 @@ with tab_jobs_temp:
             jt_rows.append({
                 "_pid": p["id"],
                 "Status": "neu",
+                "irr.": False,
                 "Notiz": "",
                 "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
                 "Arbeitgeber": p.get("arbeitgeber"),
@@ -1469,17 +1513,62 @@ with tab_jobs_temp:
         st.caption(f"{len(jt_rows)} Anzeigen ohne Zielliste-Match "
                    f"(von {len(offen)} offenen, {len(jt_postings)} gesamt). "
                    "Status setzen + speichern → die Anzeige wandert als externer "
-                   "Signal-Lead in den Tab »Job-Signale«.")
+                   "Signal-Lead in den Tab »Job-Signale«. »irr.«-Häkchen verwirft sie "
+                   "sofort (externer irrelevant-Lead), ohne Speichern.")
         if jt_rows:
+            # Ein-Klick »irr.«: verwirft eine Anzeige sofort als externen irrelevant-
+            # Lead (INSERT job_matches, Stufe extern, company_id NULL) — danach ist sie
+            # gematcht und fällt aus dieser Liste. edited_rows-Keys sind POSITIONALE
+            # Zeilenindizes -> pid_order[pos] = posting_id (via args gebunden).
+            def _jt_irr_toggle(pid_order):
+                ed = st.session_state.get("jt_editor", {}).get("edited_rows", {})
+                to_irr = []
+                for pos, changes in ed.items():
+                    if changes.get("irr.") is True:
+                        try:
+                            to_irr.append(pid_order[int(pos)])
+                        except (IndexError, ValueError):
+                            continue
+                if not to_irr:
+                    return
+                now = datetime.now(timezone.utc).isoformat()
+                try:
+                    cl = get_client()
+                    for pid in to_irr:
+                        cl.table("job_matches").insert({
+                            "posting_id": pid,
+                            "company_id": None,
+                            "match_stufe": "extern",
+                            "prio": "unbekannt",
+                            "status": "irrelevant",
+                            "status_notiz": None,
+                            "reviewed_at": now,
+                        }).execute()
+                    load_job_signale.clear()
+                    st.session_state["jt_irr_msg"] = f"{len(to_irr)}× als irrelevant verworfen."
+                except Exception as e:                         # noqa: BLE001
+                    st.session_state["jt_irr_msg"] = f"irr. fehlgeschlagen: {e}"
+                finally:
+                    st.session_state.pop("jt_editor", None)
+
+            _jt_irr_msg = st.session_state.pop("jt_irr_msg", None)
+            if _jt_irr_msg:
+                st.toast(_jt_irr_msg)
+
             jt_df = pd.DataFrame(jt_rows).set_index("_pid")
             jt_edited = st.data_editor(
                 jt_df, hide_index=True, width="stretch",
                 height=min(560, 60 + 35 * len(jt_rows)),
                 key="jt_editor",
-                disabled=[col for col in jt_df.columns if col not in ("Status", "Notiz")],
+                on_change=_jt_irr_toggle, args=(list(jt_df.index),),
+                disabled=[col for col in jt_df.columns
+                          if col not in ("Status", "irr.", "Notiz")],
                 column_config={
                     "Status": st.column_config.SelectboxColumn(
                         "Status", options=JOB_STATI, required=True, width="small"),
+                    "irr.": st.column_config.CheckboxColumn(
+                        "irr.", help="Ein Klick = als irrelevant verwerfen (wirkt sofort)",
+                        width="small"),
                     "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
                     "Anzeige": st.column_config.LinkColumn(
                         "Anzeige", display_text="Link", width="small"),
