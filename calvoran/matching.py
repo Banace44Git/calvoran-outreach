@@ -15,6 +15,13 @@ Teilmengen-Regel: Sind die Namens-Tokens des einen eine ECHTE Teilmenge des ande
 einzige Mutter-Anzeige jede Tochter. Teilmengen sind deshalb nie Auto-Match:
 gleiche PLZ -> fuzzy_grenzfall (Review, z.B. Baldus Medical vs Baldus Medical
 Engineering), Region-Stufe -> gar kein Match (E.ON SE vs E.ON One GmbH).
+
+Ort-Token-Regel: Vor dem Fuzzy-Scoring werden die Tokens des Anzeigen-Orts aus
+beiden Namen gestrippt. Das PLZ-Blocking vergleicht ohnehin nur Firmen am selben
+Ort — ein Städtename im Firmennamen ist dort null Information, bläht aber den
+token_set_ratio auf (»Roller … Gelsenkirchen« vs »Matena Gelsenkirchen« = 78,8,
+obwohl nur die Stadt gemeinsam ist). Wird ein Name durchs Strippen leer, gilt
+für ihn der volle Name; der Exakt-Vergleich läuft immer über die vollen Namen.
 """
 
 from __future__ import annotations
@@ -103,19 +110,27 @@ class CompanyIndex:
                 best[company_id] = kand
 
         gesehen_plz, gesehen_praefix = set(), set()
-        for plz, _ort in lokationen:
+        for plz, ort in lokationen:
             plz = (plz or "").strip()
             if not plz or plz in gesehen_plz:
                 continue
             gesehen_plz.add(plz)
+            ort_tokens = set(norm_text(ort).split())
+
+            def ohne_ort(name: str) -> str:
+                rest = " ".join(t for t in name.split() if t not in ort_tokens)
+                return rest or name
+
+            n_ag_o = ohne_ort(n_ag)
             for n, cid, alter in self.by_plz.get(plz, ()):
                 if n == n_ag:
                     consider(cid, "exakt", 100.0, alter)
                     continue
-                score = fuzz.token_set_ratio(n_ag, n)
+                n_o = ohne_ort(n)
+                score = fuzz.token_set_ratio(n_ag_o, n_o)
                 if score < fuzzy_review:
                     continue
-                if score >= fuzzy_auto and not _token_teilmenge(n_ag, n):
+                if score >= fuzzy_auto and not _token_teilmenge(n_ag_o, n_o):
                     consider(cid, "fuzzy", score, alter)
                 else:
                     consider(cid, "fuzzy_grenzfall", score, alter)
@@ -129,7 +144,8 @@ class CompanyIndex:
                 if n == n_ag:
                     consider(cid, "region", 100.0, alter)
                 else:
-                    score = fuzz.token_set_ratio(n_ag, n)
-                    if score >= _REGION_MIN_SCORE and not _token_teilmenge(n_ag, n):
+                    n_o = ohne_ort(n)
+                    score = fuzz.token_set_ratio(n_ag_o, n_o)
+                    if score >= _REGION_MIN_SCORE and not _token_teilmenge(n_ag_o, n_o):
                         consider(cid, "region", score, alter)
         return list(best.values())
