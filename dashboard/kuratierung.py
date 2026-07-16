@@ -34,6 +34,7 @@ if _ROOT not in sys.path:
 
 from calvoran import config  # noqa: E402
 from calvoran.db import get_client  # noqa: E402
+from calvoran.matching import mehrfach_key  # noqa: E402
 
 OUTPUT_DIR = "/Users/johannesbreuers/projects/os/01-projects/fractional-cfo/outreach"
 SELECTION_FILE = Path(OUTPUT_DIR) / "selection.jsonl"
@@ -1471,33 +1472,49 @@ def render_jobsignal_offen(gehoert, key_prefix: str) -> None:
     jt_kws = sorted({p.get("keyword") or "?" for p in offen})
     jt_kw_sel = jtf[1].multiselect("Keyword", jt_kws, default=jt_kws, key=f"{key_prefix}_kw")
 
-    jt_rows = []
-    for p in sorted(offen, key=lambda p: p.get("veroeffentlicht_am") or "9999"):
+    # Mehrfach-Anzeigen (gleicher Arbeitgeber + Titel unter neuer refnr bzw. in mehreren
+    # Städten) zu EINER Zeile bündeln: jedes Exemplar einzeln sichten wäre Doppelarbeit,
+    # und viele Orte (Spalte »Anz.«/»Ort«) sind ein Mehrstädte-Spam-Indiz. Speichern
+    # schreibt den Status auf ALLE Postings der Gruppe (siehe jt_gruppe_pids).
+    jt_gruppen: dict[tuple, list[dict]] = {}
+    for p in sorted(offen, key=lambda p: (p.get("veroeffentlicht_am") or "9999",
+                                          p.get("refnr") or "")):
+        jt_gruppen.setdefault(
+            mehrfach_key(p.get("arbeitgeber"), p.get("titel")), []).append(p)
+
+    jt_rows, jt_gruppe_pids = [], {}
+    for gruppe in jt_gruppen.values():
+        p = gruppe[0]  # ältestes Posting = Referenz (Langläufer-Signal, Link, Datum)
         if (p.get("keyword") or "?") not in jt_kw_sel:
             continue
         if jt_suche.strip():
-            hay = " ".join(str(v or "") for v in (
-                p.get("arbeitgeber"), p.get("titel"), p.get("beruf"),
-                p.get("ort"), p.get("plz"))).lower()
+            hay = " ".join(str(v or "") for q in gruppe for v in (
+                q.get("arbeitgeber"), q.get("titel"), q.get("beruf"),
+                q.get("ort"), q.get("plz"))).lower()
             if not all(w in hay for w in jt_suche.lower().split()):
                 continue
+        orte = sorted({f"{q.get('plz') or ''} {q.get('ort') or ''}".strip()
+                       for q in gruppe})
+        jt_gruppe_pids[p["id"]] = [q["id"] for q in gruppe]
         jt_rows.append({
             "_pid": p["id"],
             "Status": "neu",
             "irr.": False,
             "Notiz": "",
+            "Anz.": len(gruppe),
             "Anzeige": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{p.get('refnr')}",
             "Arbeitgeber": p.get("arbeitgeber"),
             "Stellentitel": p.get("titel"),
             "BA-Beruf": p.get("beruf"),
-            "Ort": f"{p.get('plz') or ''} {p.get('ort') or ''}".strip(),
+            "Ort": orte[0] if len(orte) == 1 else f"{len(orte)} Orte: {orte[0]} …",
             "veröffentlicht": _de_date(p.get("veroeffentlicht_am")),
             "zuletzt gesehen": _de_date(p.get("letzte_sichtung")),
             "Keyword": p.get("keyword"),
         })
-    st.caption(f"{len(jt_rows)} Anzeigen ohne Zielliste-Match in dieser Gruppe "
-               f"(von {len(offen)} offenen). Status setzen oder »irr.« ankreuzen (mehrere "
-               "möglich), dann **einmal** speichern → externer Signal-Lead in »Job-Signale« "
+    st.caption(f"{len(jt_rows)} Gesuche ({len(offen)} offene Anzeigen — Mehrfach-Anzeigen "
+               "desselben Gesuchs sind gebündelt, Spalte »Anz.«). Status setzen oder »irr.« "
+               "ankreuzen (mehrere möglich), dann **einmal** speichern → externer Signal-Lead "
+               "in »Job-Signale«; wirkt auf alle Anzeigen der Zeile "
                "(»irr.« = als irrelevant verwerfen).")
     if not jt_rows:
         st.info("Kein Treffer im Filter.")
@@ -1515,6 +1532,10 @@ def render_jobsignal_offen(gehoert, key_prefix: str) -> None:
                 "irr.", help="ankreuzen = beim Speichern als irrelevant verwerfen",
                 width="small"),
             "Notiz": st.column_config.TextColumn("Notiz", width="medium"),
+            "Anz.": st.column_config.NumberColumn(
+                "Anz.", help="Anzeigen in dieser Gruppe (gleicher Arbeitgeber + Titel); "
+                             ">1 = Re-Posts/Mehrstädte, viele Orte = Spam-Indiz",
+                width="small"),
             "Anzeige": st.column_config.LinkColumn(
                 "Anzeige", display_text="Link", width="small"),
             "Arbeitgeber": st.column_config.TextColumn("Arbeitgeber", width="medium"),
@@ -1531,21 +1552,24 @@ def render_jobsignal_offen(gehoert, key_prefix: str) -> None:
                 jt_notiz = (jt_edited.at[pid, "Notiz"] or "").strip()
                 if jt_status == "neu" and not jt_notiz:
                     continue
-                # Externer Signal-Lead (Migration 0008): job_matches ohne Firma.
-                cl_jt.table("job_matches").insert({
-                    "posting_id": pid,
-                    "company_id": None,
-                    "match_stufe": "extern",
-                    "prio": "unbekannt",
-                    "status": jt_status,
-                    "status_notiz": jt_notiz or None,
-                    "reviewed_at": (datetime.now(timezone.utc).isoformat()
-                                    if jt_status != "neu" else None),
-                }).execute()
+                # Externer Signal-Lead (Migration 0008): job_matches ohne Firma —
+                # je EIN Lead pro Posting der Mehrfach-Anzeigen-Gruppe, sonst taucht
+                # der Rest der Gruppe beim nächsten Laden wieder als offen auf.
+                for gpid in jt_gruppe_pids.get(pid, [pid]):
+                    cl_jt.table("job_matches").insert({
+                        "posting_id": gpid,
+                        "company_id": None,
+                        "match_stufe": "extern",
+                        "prio": "unbekannt",
+                        "status": jt_status,
+                        "status_notiz": jt_notiz or None,
+                        "reviewed_at": (datetime.now(timezone.utc).isoformat()
+                                        if jt_status != "neu" else None),
+                    }).execute()
                 n_neu += 1
             if n_neu:
                 load_job_signale.clear()
-                st.toast(f"{n_neu} Anzeige(n) in »Job-Signale« übernommen.")
+                st.toast(f"{n_neu} Gesuch(e) in »Job-Signale« übernommen.")
                 st.rerun()
             else:
                 st.toast("Keine Änderungen.")

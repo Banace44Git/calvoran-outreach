@@ -54,4 +54,8 @@ Zwei Ausprägungen: **regulärer Match** (company_id gesetzt) und **externer Sig
   ist ein eigener Terminalzustand (kontaktiert, aber abgesagt) ≠ irrelevant (Match-Müll) ≠ outreach (aktiv).
 - Dashboard schreibt `status`/`status_notiz`/`reviewed_at`; das »irr.«-Häkchen setzt status='irrelevant' sofort, im TEMP-Tab per INSERT eines externen irrelevant-Leads.
 - `prio` wird über `--reprio` aus dem aktuellen `companies.gf_alter` neu gesetzt.
+- **Mehrfach-Anzeigen-Dedup (c6, kein DB-Constraint):** je (norm. Arbeitgeber+Titel,
+  company_id) höchstens ein Match — Re-Posts unter neuer refnr und Mehrstädte-Ketten
+  erzeugen keine neuen Zeilen (`dedupe_matches`; der Bestand inkl. Gesichtetem claimt
+  die Gruppe, `--rematch` konvergiert Alt-Dubletten mit status='neu').
 - 10 Spalten (Drift-Check-Bezug).

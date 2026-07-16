@@ -52,6 +52,10 @@ Langläufer (>28 Tage offen, Besetzungsschwierigkeit) sind sonst unsichtbar.
 
 Konfig: `config/jobsignale.yaml` (Keyword-Gruppen kfm_ltg/contr_fibu mit je eigener
 Titel-Positivliste, gemeinsame Negativlisten, Match-Schwellwerte).
+Mehrfach-Anzeigen (gleicher Arbeitgeber+Titel unter neuer refnr bzw. in mehreren
+Städten) zählen als EIN Gesuch: c6 schreibt je Gruppe+Firma höchstens einen Match
+(`dedupe_matches`, auch cross-run gegen den Bestand), die Offen-Tabs bündeln sie zu
+einer Zeile (Spalte »Anz.«, Speichern wirkt auf die ganze Gruppe).
 Sichtung: Dashboard-Tab »Job-Signale« (Status neu → gesichtet/relevant/irrelevant).
 Phase B (nach Sichtungsmonat, User-Go nötig): Hermes-Cron täglich + Brief »zweite
 Führungsebene« über c5-Mechanik.

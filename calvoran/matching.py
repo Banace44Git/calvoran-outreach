@@ -63,6 +63,13 @@ def _token_teilmenge(a: str, b: str) -> bool:
     return ta != tb and (ta <= tb or tb <= ta)
 
 
+def mehrfach_key(arbeitgeber: str | None, titel: str | None) -> tuple[str, str]:
+    """Mehrfach-Anzeigen-Anker: Re-Posts unter neuer refnr und Mehrstädte-Ketten
+    desselben Gesuchs (gleicher Arbeitgeber, gleicher Titel) zählen als EIN Signal.
+    Gemeinsamer Schlüssel für c6-Match-Dedup und Dashboard-Gruppierung."""
+    return norm_firma(arbeitgeber), norm_text(titel)
+
+
 def prio_from_alter(gf_alter) -> str:
     """companies.gf_alter -> Prio. NULL ist eigene Klasse (»Alter unbekannt != jung«)."""
     if gf_alter is None:

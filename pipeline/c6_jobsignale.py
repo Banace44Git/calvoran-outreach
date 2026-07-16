@@ -34,7 +34,7 @@ from calvoran.ba_jobsuche import (ANZEIGE_URL, BaJobsucheClient, lokationen,
                                   parse_posting, snap_veroeffentlichtseit)
 from calvoran.db import get_client
 from calvoran.logging import JsonLogger
-from calvoran.matching import CompanyIndex, norm_text, prio_from_alter
+from calvoran.matching import CompanyIndex, mehrfach_key, norm_text, prio_from_alter
 from pathlib import Path
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "jobsignale.yaml")
@@ -173,6 +173,43 @@ def match_postings(postings: list[dict], idx: CompanyIndex, cfg: dict) -> tuple[
     return by_refnr, ohne_plz
 
 
+def dedupe_matches(by_refnr: dict, postings_by_refnr: dict,
+                   claimed: set[tuple]) -> tuple[dict, int]:
+    """Mehrfach-Anzeigen: je (Arbeitgeber+Titel-Gruppe, Firma) überlebt genau EIN Match —
+    das des ältesten Postings. Re-Posts unter neuer refnr erzeugten sonst Dublettenzeilen
+    in der Review-Queue. `claimed` sind bereits vergebene (mehrfach_key, company_id) aus
+    dem DB-Bestand (wird in-place erweitert); Rückgabe: (bereinigt, Anzahl Drops)."""
+    out: dict[str, list[dict]] = {}
+    dropped = 0
+    reihenfolge = sorted(by_refnr, key=lambda r: (
+        postings_by_refnr[r].get("veroeffentlicht_am") or "9999", r))
+    for refnr in reihenfolge:
+        p = postings_by_refnr[refnr]
+        gk = mehrfach_key(p["arbeitgeber"], p["titel"])
+        keep = []
+        for m in by_refnr[refnr]:
+            k = (gk, m["company_id"])
+            if k in claimed:
+                dropped += 1
+                continue
+            claimed.add(k)
+            keep.append(m)
+        if keep:
+            out[refnr] = keep
+    return out, dropped
+
+
+def bestand_claims(client) -> set[tuple]:
+    """(mehrfach_key, company_id) aller existierenden Matches — verhindert, dass ein
+    Wochenlauf für einen Re-Post (neue refnr, gleiches Gesuch) eine zweite Zeile anlegt."""
+    postings = fetch_all(client, "job_postings", "id,arbeitgeber,titel")
+    gk_by_pid = {p["id"]: mehrfach_key(p["arbeitgeber"], p["titel"]) for p in postings}
+    matches = fetch_all(client, "job_matches", "posting_id,company_id")
+    return {(gk_by_pid[m["posting_id"]], m["company_id"])
+            for m in matches
+            if m["company_id"] and m["posting_id"] in gk_by_pid}
+
+
 def print_match_sample(by_refnr: dict, postings_by_refnr: dict, firmen_by_id: dict,
                        w1: set[str], limit: int = 30) -> None:
     flat = []
@@ -251,10 +288,12 @@ def cmd_fetch(args, cfg: dict, log: JsonLogger) -> None:
     idx = CompanyIndex(firmen, plz_praefix_stellen=cfg["match"]["plz_praefix_stellen"])
     firmen_by_id = {r["id"]: r for r in firmen}
     by_refnr, ohne_plz = match_postings(list(postings.values()), idx, cfg)
+    by_refnr, mehrfach_drops = dedupe_matches(by_refnr, postings, bestand_claims(client))
     n_matches = sum(len(v) for v in by_refnr.values())
     stufen = Counter(m["match_stufe"] for ms in by_refnr.values() for m in ms)
     print(f"Matches: {n_matches} auf {len(by_refnr)} Anzeigen "
-          f"| Stufen: {dict(stufen)} | Anzeigen ohne PLZ (übersprungen): {ohne_plz}")
+          f"| Stufen: {dict(stufen)} | Anzeigen ohne PLZ (übersprungen): {ohne_plz} "
+          f"| Mehrfach-Anzeigen-Dubletten unterdrückt: {mehrfach_drops}")
 
     if args.dry_run:
         print_match_sample(by_refnr, postings, firmen_by_id, welle1_ids())
@@ -266,7 +305,8 @@ def cmd_fetch(args, cfg: dict, log: JsonLogger) -> None:
     n_rows = insert_matches(client, by_refnr, id_by_refnr)
     log.log("jobsignale_fetch", tage=tage, anzeigen=len(postings),
             matches=n_matches, match_zeilen=n_rows, ohne_plz=ohne_plz,
-            stufen=dict(stufen), je_keyword=dict(je_keyword))
+            mehrfach_drops=mehrfach_drops, stufen=dict(stufen),
+            je_keyword=dict(je_keyword))
     print(f"Geschrieben: {len(postings)} postings (upsert), {n_rows} match-Zeilen "
           f"(Bestand bleibt unberührt).")
     print_match_sample(by_refnr, postings, firmen_by_id, welle1_ids(), limit=15)
@@ -280,7 +320,8 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
     Matches wird nur status='neu' angepasst/gelöscht; Gesichtetes bleibt unberührt.
     """
     client = get_client()
-    postings = fetch_all(client, "job_postings", "id,refnr,titel,beruf,arbeitgeber,plz,ort,raw")
+    postings = fetch_all(client, "job_postings",
+                         "id,refnr,titel,beruf,arbeitgeber,plz,ort,veroeffentlicht_am,raw")
 
     gruppen_positiv, negativ_titel, negativ_beruf = titel_regeln(cfg)
     # Müll-Prüfung gegen die VEREINIGUNG aller Gruppen-Positivlisten: eine Anzeige
@@ -302,6 +343,16 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
     firmen = load_companies(client)
     idx = CompanyIndex(firmen, plz_praefix_stellen=cfg["match"]["plz_praefix_stellen"])
     by_refnr, ohne_plz = match_postings(postings, idx, cfg)
+    # Mehrfach-Anzeigen-Dedup: Gesichtetes claimt seine (Arbeitgeber+Titel, Firma)-Gruppe
+    # vorab — sonst würde ein Rematch das Gesuch erneut über das älteste Posting als
+    # 'neu' einspielen, obwohl es unter anderer refnr schon gesichtet wurde.
+    p_by_id = {p["id"]: p for p in postings}
+    claimed = {(mehrfach_key(p_by_id[b["posting_id"]]["arbeitgeber"],
+                             p_by_id[b["posting_id"]]["titel"]), b["company_id"])
+               for b in bestand_alle
+               if b["company_id"] and b["status"] != "neu" and b["posting_id"] in p_by_id}
+    by_refnr, mehrfach_drops = dedupe_matches(
+        by_refnr, {p["refnr"]: p for p in postings}, claimed)
     neu: dict[tuple[str, str], dict] = {}
     pid_by_refnr = {p["refnr"]: p["id"] for p in postings}
     for refnr, ms in by_refnr.items():
@@ -336,10 +387,11 @@ def cmd_rematch(args, cfg: dict, log: JsonLogger) -> None:
             chunk, on_conflict="posting_id,company_id", ignore_duplicates=True).execute()
     n_ins = len(rows)
     log.log("jobsignale_rematch", postings_geloescht=len(muell_ids), aktualisiert=n_upd,
-            geloescht=n_del, neu=n_ins, ohne_plz=ohne_plz)
+            geloescht=n_del, neu=n_ins, ohne_plz=ohne_plz, mehrfach_drops=mehrfach_drops)
     print(f"Rematch: {len(muell_ids)} Postings nach Titel-Regeln entfernt; Matches: "
           f"{n_ins} neu, {n_upd} aktualisiert, {n_del} gelöscht "
-          f"(nur status='neu'; {len(bestand)} Bestand).")
+          f"(nur status='neu'; {len(bestand)} Bestand; "
+          f"Mehrfach-Anzeigen-Dubletten unterdrückt: {mehrfach_drops}).")
 
 
 def cmd_reprio(args, cfg: dict, log: JsonLogger) -> None:
