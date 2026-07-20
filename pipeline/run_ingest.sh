@@ -16,6 +16,8 @@
 #   ND_CSV_DIR=/pfad   neuer North-Data-Batch (searchresults*.csv) — sonst c0/c1 übersprungen
 #   MIN_SCORE=2        Prioritätsschwelle für c2/c3 (Default 2 = A/B-Kandidaten zuerst)
 #   WEB_TAIL=1         auch den Rest (prioritaets_score < MIN_SCORE) crawlen/dossieren
+#   C3_TAIL_LIMIT=500  Dossier-Deckel je Tail-Lauf (0 = alle) — haelt den Daemon-Zyklus
+#                      kurz, damit phase_data/GF>=58-Priorisierung regelmaessig drankommen
 #   IDS_FILE=/pfad     gezielter Web-Lauf über eine ID-Liste (z.B. Nachfolge-Kandidaten
 #                      nach GF-Alter) statt über MIN_SCORE — c2/c3/c4 laufen mit --ids-file
 #
@@ -34,6 +36,7 @@ export PYTHONPATH="$ROOT:$ROOT/pipeline"
 
 MIN_SCORE="${MIN_SCORE:-2}"
 WEB_TAIL="${WEB_TAIL:-0}"
+C3_TAIL_LIMIT="${C3_TAIL_LIMIT:-500}"
 MODE="${1:-all}"
 LOG="$HOME/projects/os/01-projects/fractional-cfo/outreach/ingest-$(date +%F).log"
 
@@ -110,7 +113,7 @@ phase_web() {
   #    RAM-Guard: bei aktivem C3_RAM_GUARD weicht dieser Schritt der hr-engine aus.
   if c3_ram_ok; then
     run "$PY" pipeline/c3_extract.py --min-score "$MIN_SCORE" --report || true
-    [ "$WEB_TAIL" = "1" ] && run "$PY" pipeline/c3_extract.py --report || true
+    [ "$WEB_TAIL" = "1" ] && run "$PY" pipeline/c3_extract.py --limit "$C3_TAIL_LIMIT" --report || true
   fi
   # 6. Deterministisches Scoring (kein LLM, schnell).
   run "$PY" pipeline/c4_score_cluster.py --report || true

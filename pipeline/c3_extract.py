@@ -33,7 +33,7 @@ from _common import OUTPUT_DIR, norm
 from benchmark_p0 import belegtreue, fields_filled
 
 from calvoran import config, extractor
-from calvoran.db import get_client
+from calvoran.db import fetch_all, get_client
 from calvoran.logging import JsonLogger
 from calvoran.model_router import ModelRouter
 
@@ -53,14 +53,8 @@ def task_for(score, override) -> str:
 # Selektion (resume: Firmen mit bestehendem Dossier überspringen)
 # --------------------------------------------------------------------------- #
 def existing_dossier_ids(client) -> set:
-    ids, step, start = set(), 1000, 0
-    while True:
-        r = client.table("dossiers").select("company_id").order("id").range(start, start + step - 1).execute()
-        ids.update(x["company_id"] for x in r.data)
-        if len(r.data) < step:
-            break
-        start += step
-    return ids
+    rows = fetch_all(lambda: client.table("dossiers").select("id,company_id"))
+    return {x["company_id"] for x in rows}
 
 
 COLS = ("id,name,website,domain,prioritaets_score,bilanzsumme_eur,"
@@ -90,19 +84,13 @@ def select_by_ids(client, ids, limit):
 
 def select_companies(client, *, score, min_score, limit, force):
     """Erreichbar gecrawlte Firmen ohne Dossier, sortiert prioritaets_score desc, dann bilanzsumme desc."""
-    out, step, start = [], 1000, 0
-    while True:
-        q = (client.table("companies").select(COLS)
-             .not_.is_("tech_signals", "null")
-             .filter("tech_signals->>reachable", "eq", "true")
-             .eq("holding_flag", False)
-             .is_("dup_of", "null")
-             .eq("excluded", False))
-        r = q.order("id").range(start, start + step - 1).execute()
-        out.extend(r.data)
-        if len(r.data) < step:
-            break
-        start += step
+    out = fetch_all(lambda: (
+        client.table("companies").select(COLS)
+        .not_.is_("tech_signals", "null")
+        .filter("tech_signals->>reachable", "eq", "true")
+        .eq("holding_flag", False)
+        .is_("dup_of", "null")
+        .eq("excluded", False)))
 
     if not force:
         done = existing_dossier_ids(client)
