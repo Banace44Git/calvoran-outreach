@@ -30,7 +30,7 @@ from pathlib import Path
 from _common import OUTPUT_DIR, norm, wz2
 
 from calvoran import config
-from calvoran.db import get_client
+from calvoran.db import fetch_all, get_client
 from calvoran.logging import JsonLogger
 from calvoran.schemas import Dossier
 from config import keywords
@@ -323,14 +323,7 @@ def _ko_reason(bd) -> str:
 # Laden (resume: Firmen mit Score ueberspringen, ausser --force/--ids)
 # --------------------------------------------------------------------------- #
 def _paginate_ids(client, table, col):
-    ids, step, start = set(), 1000, 0
-    while True:
-        r = client.table(table).select(col).order("id").range(start, start + step - 1).execute()
-        ids.update(x[col] for x in r.data)
-        if len(r.data) < step:
-            break
-        start += step
-    return ids
+    return {x[col] for x in fetch_all(lambda: client.table(table).select(f"id,{col}"))}
 
 
 def load_dossiers(client, only_ids=None) -> dict:
@@ -343,14 +336,8 @@ def load_dossiers(client, only_ids=None) -> dict:
             for d in r.data:
                 out[d["company_id"]] = d["dossier"]
         return out
-    step, start = 1000, 0
-    while True:
-        r = client.table("dossiers").select("company_id,dossier").order("id").range(start, start + step - 1).execute()
-        for d in r.data:
-            out[d["company_id"]] = d["dossier"]
-        if len(r.data) < step:
-            break
-        start += step
+    for d in fetch_all(lambda: client.table("dossiers").select("id,company_id,dossier"), step=500):
+        out[d["company_id"]] = d["dossier"]
     return out
 
 
