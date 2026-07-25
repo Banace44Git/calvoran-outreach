@@ -88,6 +88,9 @@ def select_companies(client, *, score, min_score, limit, force):
         client.table("companies").select(COLS)
         .not_.is_("tech_signals", "null")
         .filter("tech_signals->>reachable", "eq", "true")
+        # no_text_content-Flag: erreichbar, aber ohne extrahierbaren Text — wuerde
+        # nur als Skip enden und dabei Tail-Limit-Slots belegen.
+        .filter("tech_signals->>no_text_content", "is", "null")
         .eq("holding_flag", False)
         .is_("dup_of", "null")
         .eq("excluded", False)))

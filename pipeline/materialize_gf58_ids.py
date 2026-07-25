@@ -63,7 +63,10 @@ def gf58_backlog(client, min_alter) -> list:
         for x in r.data:
             ts = x.get("tech_signals")
             reachable = isinstance(ts, dict) and ts.get("reachable") is True
-            if (ts is None or reachable) and x["id"] not in scored:
+            # no_text_content: erreichbar, aber keine Seite mit extrahierbarem Text —
+            # bekommt nie ein Dossier/Score und wuerde den Vorrat dauerhaft verstopfen.
+            dossierfaehig = not (isinstance(ts, dict) and ts.get("no_text_content") is True)
+            if (ts is None or reachable) and dossierfaehig and x["id"] not in scored:
                 out.append(x["id"])
         if len(r.data) < step:
             break

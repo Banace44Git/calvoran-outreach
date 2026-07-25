@@ -53,7 +53,7 @@ sondern matchen dagegen.
 | `exclude_reason` | text | ja | |
 | `website_modernity_score` | int | ja | 0..10, NULL = keine Website (c2). |
 | `modernity_breakdown` | jsonb | ja | Score-Herleitung (c2). |
-| `tech_signals` | jsonb | ja | Erkannte Tech-Merkmale (c2). |
+| `tech_signals` | jsonb | ja | Erkannte Tech-Merkmale (c2). Schlüssel u.a. `reachable` (bool); `no_text_content=true` = erreichbar, aber keine `pages`-Zeile mit Text (Frameset/JS-only/Platzhalter) — wird von materialize_gf58_ids und c3-Selektion ausgeschlossen. |
 | `raw` | jsonb | nein | Alle 53 CSV-Spalten verlustfrei. |
 | `imported_at` | timestamptz | nein | default now(). |
 | `updated_at` | timestamptz | nein | default now(). |

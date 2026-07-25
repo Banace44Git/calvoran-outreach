@@ -122,6 +122,12 @@ def persist(client, company, result, mod_cfg, now_year, now_iso) -> dict:
     score, breakdown = modernity.compute(tech, mod_cfg, now_year=now_year)
     # home_html (bis 200 KB) ist nur Rohstoff für den Score; nicht persistieren.
     tech_slim = {k: v for k, v in tech.items() if k != "home_html"}
+    # Erreichbar, aber keine Seite mit extrahierbarem Text (Frameset/JS-only/
+    # Platzhalter): c3 kann daraus nie ein Dossier bauen. Flag haelt die Firma aus
+    # dem GF>=58-Vorrat und der c3-Selektion (materialize_gf58_ids, select_companies).
+    if tech.get("reachable") and not any(
+            (p.get("text") or "").strip() for p in result.get("pages", [])):
+        tech_slim["no_text_content"] = True
 
     client.table("companies").update({
         "tech_signals": tech_slim,
